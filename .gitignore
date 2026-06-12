@@ -1,0 +1,16 @@
+# Delphi outputs
+*.dcu
+*.dcp
+*.bpl
+*.map
+*.tds
+*.identcache
+*.local
+*.dproj.local
+Win32/
+__history/
+__recovery/
+
+# Runtime
+*.log
+db_settings.xml  # <-- Конфиг с паролями не коммитить!
