@@ -41,7 +41,7 @@ DataSnapServer/
 
 1. **Embarcadero Delphi 11/12** (с поддержкой 64-bit Windows).
 2. **PostgreSQL 13+** (с установленным расширением `pg_cron` для периодической очистки, опционально).
-3. **Библиотека LoggerPro:** Должна быть установлена через *Tools → GetIt Package Manager* или добавлена в *Library Path* (папка `src` из репозитория).
+3. **Библиотека LoggerPro:** Должна быть установлена через *Tools → GetIt Package Manager* или добавлена в *Library Path* (Необходимо скачать с https://github.com/danieleteti/loggerpro).
 4. **FireDAC:** Драйвер `libpq.dll` должен быть доступен в PATH системы или в папке с исполняемым файлом.
 
 ---
