@@ -18,6 +18,7 @@ object WebModule1: TWebModule1
       OnAction = WebModuleDefaultAction
     end>
   BeforeDispatch = WebModuleBeforeDispatch
+  AfterDispatch = WebModuleAfterDispatch
   Height = 333
   Width = 414
   object DSServer1: TDSServer
@@ -34,6 +35,7 @@ object WebModule1: TWebModule1
   object DSServerClass1: TDSServerClass
     OnGetClass = DSServerClass1GetClass
     Server = DSServer1
+    LifeCycle = 'Invocation'
     Left = 200
     Top = 11
   end
@@ -101,5 +103,46 @@ object WebModule1: TWebModule1
     Server = DSServer1
     Left = 208
     Top = 248
+  end
+  object DSAuthenticationManager1: TDSAuthenticationManager
+    OnUserAuthenticate = DSAuthenticationManager1UserAuthenticate
+    OnUserAuthorize = DSAuthenticationManager1UserAuthorize
+    Roles = <>
+    Left = 168
+    Top = 136
+  end
+  object qryValidate: TFDQuery
+    Connection = WebConn
+    SQL.Strings = (
+      'SELECT '
+      '  COUNT(*) as cnt'
+      '  FROM user_sessions '
+      ' WHERE session_token = :token '
+      '   AND expires_at > CURRENT_TIMESTAMP')
+    Left = 312
+    Top = 144
+    ParamData = <
+      item
+        Name = 'TOKEN'
+        DataType = ftString
+        ParamType = ptInput
+        Value = Null
+      end>
+  end
+  object WebConn: TFDConnection
+    Params.Strings = (
+      'Server=localhost'
+      'Database=postgres'
+      'User_Name=postgres'
+      'DriverID=PG'
+      'Port=5432'
+      'Pooled=True'
+      'POOL_MaximumItems=10')
+    ResourceOptions.AssignedValues = [rvSilentMode]
+    ResourceOptions.SilentMode = True
+    TxOptions.AutoStop = False
+    LoginPrompt = False
+    Left = 48
+    Top = 12
   end
 end

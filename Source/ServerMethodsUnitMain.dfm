@@ -49,4 +49,31 @@ object ServerMethods1: TServerMethods1
         ParamType = ptInput
       end>
   end
+  object qrySession: TFDQuery
+    Connection = PGConn
+    SQL.Strings = (
+      'INSERT INTO user_sessions (user_id, session_token, expires_at) '
+      'VALUES (:uid, :token, :exp)')
+    Left = 148
+    Top = 92
+    ParamData = <
+      item
+        Name = 'UID'
+        DataType = ftInteger
+        FDDataType = dtInt32
+        ParamType = ptInput
+      end
+      item
+        Name = 'TOKEN'
+        DataType = ftString
+        FDDataType = dtWideString
+        ParamType = ptInput
+      end
+      item
+        Name = 'EXP'
+        DataType = ftDateTime
+        FDDataType = dtDateTime
+        ParamType = ptInput
+      end>
+  end
 end

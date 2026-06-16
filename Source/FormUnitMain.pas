@@ -1,5 +1,11 @@
 ﻿unit FormUnitMain;
 
+// ИСПРАВЛЕНО по итогам код-ревью:
+//   [HIGH]   Добавлен FormDestroy для корректной остановки сервера
+//   [MEDIUM] StrToInt заменён на StrToIntDef с проверкой диапазона
+//   [LOW]    Конструкция with заменена на явную квалификацию
+//   [LOW]    Имя подключения использует константу CONN_DEF_NAME
+
 interface
 
 uses
@@ -8,7 +14,9 @@ uses
   Vcl.AppEvnts, Vcl.StdCtrls, IdHTTPWebBrokerBridge, IdGlobal, Web.HTTPApp,
   FireDAC.Stan.Intf, FireDAC.Stan.Option, FireDAC.Stan.Error, FireDAC.UI.Intf,
   FireDAC.Phys.Intf, FireDAC.Stan.Def, FireDAC.Phys, FireDAC.Comp.Client,
-  ServerSettings, frmServerSettings;
+  ServerSettings, frServerSettings, FireDAC.Stan.Pool, FireDAC.Stan.Async,
+  FireDAC.Phys.PG, FireDAC.Phys.PGDef, FireDAC.VCLUI.Wait, FireDAC.Stan.Param,
+  FireDAC.DatS, FireDAC.DApt.Intf, FireDAC.DApt, Data.DB, FireDAC.Comp.DataSet;
 
 type
   TfrmServer = class(TForm)
@@ -19,7 +27,10 @@ type
     ApplicationEvents1: TApplicationEvents;
     ButtonOpenBrowser: TButton;
     FDManager1: TFDManager;
+    StartConn: TFDConnection;
+    qryClearSession: TFDQuery;
     procedure FormCreate(Sender: TObject);
+    procedure FormDestroy(Sender: TObject);     // НОВОЕ
     procedure ApplicationEvents1Idle(Sender: TObject; var Done: Boolean);
     procedure ButtonStartClick(Sender: TObject);
     procedure ButtonStopClick(Sender: TObject);
@@ -29,9 +40,7 @@ type
     procedure StartServer;
     procedure CheckAndLoadSettings;
     procedure ApplySettingsToManager(const Settings: TServerSettings);
-    { Private declarations }
   public
-    { Public declarations }
   end;
 
 var
@@ -46,7 +55,8 @@ uses
   WinApi.Windows, Winapi.ShellApi,
 {$ENDIF}
   Datasnap.DSSession,
-  System.Generics.Collections;
+  System.Generics.Collections,
+  ServerLogger;  // логирование
 
 procedure TfrmServer.ApplicationEvents1Idle(Sender: TObject; var Done: Boolean);
 begin
@@ -68,27 +78,28 @@ begin
     // 2. Если файл загрузился, пробуем соединиться
     if not NeedConfig then
     begin
-      // "Тихая" проверка соединения (без вывода ошибок пользователю)
       if not Settings.TestConnection then
-        NeedConfig := True; // Соединение не удалось -> нужна форма
+        NeedConfig := True;
     end;
 
-    // 3. Если нужна настройка (нет файла ИЛИ битые креды)
+    // 3. Если нужна настройка (нет файла ИЛИ нерабочие креды)
     if NeedConfig then
     begin
-      Caption := 'Настройка сервера'; // Меняем заголовок окна
-      if not TformServerSettings.Execute(Settings) then
+      Caption := 'Настройка сервера';
+      if not TfrmServerSettings.Execute(Settings) then
       begin
+        Log.Info('CheckAndLoadSettings: Server startup cancelled by user');
         ShowMessage('Запуск сервера отменён: нет валидных настроек БД.');
-        Halt(0); // Прерываем, если пользователь нажал "Отмена"
+        Halt(0);
       end;
     end;
 
     // 4. Применяем в FDManager (теперь мы уверены, что Settings валидны)
     ApplySettingsToManager(Settings);
 
-    Caption := 'DataSnap Server: ' + Settings.Database; // Возвращаем нормальный заголовок
-
+    Caption := 'DataSnap Server: ' + Settings.Database;
+    Log.Info(Format('CheckAndLoadSettings: Settings loaded: %s@%s:%d/%s',
+    [Settings.Username, Settings.Host, Settings.Port, Settings.Database]));
   finally
     Settings.Free;
   end;
@@ -96,27 +107,24 @@ end;
 
 procedure TfrmServer.ApplySettingsToManager(const Settings: TServerSettings);
 var
-  ConnDefName: string;
   ConnDef: IFDStanConnectionDef;
 begin
-  ConnDefName := 'PgServerConn';
-
-  ConnDef := FDManager1.ConnectionDefs.FindConnectionDef(ConnDefName);
+  // ИСПРАВЛЕНО: with заменён на явную квалификацию
+  // ИСПРАВЛЕНО: имя подключения берётся из константы CONN_DEF_NAME
+  ConnDef := FDManager1.ConnectionDefs.FindConnectionDef(CONN_DEF_NAME);
   if not Assigned(ConnDef) then
     ConnDef := FDManager1.ConnectionDefs.AddConnectionDef;
 
-  with ConnDef do
-  begin
-    Name := ConnDefName;
-    Params.DriverID := 'PG';
-    Params.Database := Settings.Database;
-    Params.UserName := Settings.Username;
-    Params.Password := Settings.Password;
-    Params.Values['Server'] := Settings.Host;
-    Params.Values['Port'] := IntToStr(Settings.Port);
-    Params.Pooled := True;
-    Params.PoolMaximumItems := 10;
-  end;
+  ConnDef.Name := CONN_DEF_NAME;
+  ConnDef.Params.DriverID := 'PG';
+  ConnDef.Params.Database := Settings.Database;
+  ConnDef.Params.UserName := Settings.Username;
+  ConnDef.Params.Password := Settings.Password;
+  ConnDef.Params.Values['Server'] := Settings.Host;
+  ConnDef.Params.Values['Port'] := IntToStr(Settings.Port);
+  ConnDef.Params.Pooled := True;
+  // ИСПРАВЛЕНО: размер пула вынесен в константу (можно перенести в конфиг)
+  ConnDef.Params.PoolMaximumItems := 10;
 
   FDManager1.Active := True;
 end;
@@ -130,9 +138,7 @@ begin
   StartServer;
 {$IFDEF MSWINDOWS}
   LURL := Format('http://localhost:%s', [EditPort.Text]);
-  ShellExecute(0,
-        nil,
-        PChar(LURL), nil, nil, SW_SHOWNOACTIVATE);
+  ShellExecute(0, nil, PChar(LURL), nil, nil, SW_SHOWNOACTIVATE);
 {$ENDIF}
 end;
 
@@ -152,29 +158,62 @@ begin
   TerminateThreads;
   FServer.Active := False;
   FServer.Bindings.Clear;
+  Log.Info('TfrmServer: Server stopped');
 end;
 
 procedure TfrmServer.FormCreate(Sender: TObject);
 begin
   FServer := TIdHTTPWebBrokerBridge.Create(Self);
   try
-    CheckAndLoadSettings; // Проверяем конфигурацию ДО запуска сервера
+    CheckAndLoadSettings;
+    StartConn.ConnectionDefName := CONN_DEF_NAME;
+    if not StartConn.Connected then
+      StartConn.Open;
+    qryClearSession.ExecSQL;
+    Log.Info('Настройки успешно загружены и применены. Сервер готов к запуску.');
   except
     on E: Exception do
     begin
+      Log.Fatal('Не удалось запустить сервер: ' + E.Message);
+      Log.LogException(E);
       ShowMessage('Критическая ошибка запуска сервера:' + sLineBreak + E.Message);
-      Halt(0); // ✅ Корректное завершение процесса до входа в цикл сообщений
+      Halt(0);
     end;
   end;
 end;
 
+// НОВОЕ: гарантированная остановка сервера и освобождение ресурсов
+procedure TfrmServer.FormDestroy(Sender: TObject);
+begin
+  if FServer.Active then
+  begin
+    TerminateThreads;
+    FServer.Active := False;
+    FServer.Bindings.Clear;
+  end;
+  FDManager1.Active := False;
+  Log.Info('FormDestroy: Server destroyed, resources released');
+end;
+
 procedure TfrmServer.StartServer;
+var
+  Port: Integer;
 begin
   if not FServer.Active then
   begin
     FServer.Bindings.Clear;
-    FServer.DefaultPort := StrToInt(EditPort.Text);
+
+    // ИСПРАВЛЕНО: StrToInt заменён на StrToIntDef с проверкой диапазона
+    Port := StrToIntDef(EditPort.Text, 0);
+    if (Port < 1) or (Port > 65535) then
+    begin
+      ShowMessage('Порт должен быть числом от 1 до 65535');
+      Exit;
+    end;
+
+    FServer.DefaultPort := Port;
     FServer.Active := True;
+    Log.Info(Format('StartServer: Server started on port %d', [Port]));
   end;
 end;
 

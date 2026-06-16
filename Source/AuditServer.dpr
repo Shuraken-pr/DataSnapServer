@@ -11,7 +11,9 @@ uses
   ServerMethodsUnitMain in 'ServerMethodsUnitMain.pas' {ServerMethods1: TDSServerModule},
   WebModuleUnitMain in 'WebModuleUnitMain.pas' {WebModule1: TWebModule},
   ServerSettings in 'ServerSettings.pas',
-  frmServerSettings in 'frmServerSettings.pas' {formServerSettings};
+  WinDPAPIUtils in 'WinDPAPIUtils.pas',
+  ServerLogger in 'ServerLogger.pas',
+  ServerSessionContext in 'ServerSessionContext.pas';
 
 {$R *.res}
 

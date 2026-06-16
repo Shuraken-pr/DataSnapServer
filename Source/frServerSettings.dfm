@@ -1,8 +1,8 @@
-object formServerSettings: TformServerSettings
+object frmServerSettings: TfrmServerSettings
   Left = 0
   Top = 0
   Caption = #1053#1072#1089#1090#1088#1086#1081#1082#1080' '#1089#1086#1077#1076#1080#1085#1077#1085#1080#1103
-  ClientHeight = 226
+  ClientHeight = 278
   ClientWidth = 475
   Color = clBtnFace
   Font.Charset = DEFAULT_CHARSET
@@ -15,11 +15,10 @@ object formServerSettings: TformServerSettings
     Left = 0
     Top = 0
     Width = 475
-    Height = 226
+    Height = 278
     Align = alClient
     TabOrder = 0
-    ExplicitWidth = 393
-    ExplicitHeight = 322
+    ExplicitHeight = 226
     object edPort: TcxSpinEdit
       Left = 85
       Top = 42
@@ -47,13 +46,13 @@ object formServerSettings: TformServerSettings
     end
     object btnOk: TBitBtn
       Left = 359
-      Top = 189
+      Top = 241
       Width = 104
       Height = 25
       Caption = 'OK'
       Default = True
       NumGlyphs = 2
-      TabOrder = 6
+      TabOrder = 8
       OnClick = btnOkClick
     end
     object edLogin: TcxTextEdit
@@ -90,18 +89,36 @@ object formServerSettings: TformServerSettings
     end
     object btnTest: TButton
       Left = 12
-      Top = 189
+      Top = 241
       Width = 113
       Height = 25
       Caption = #1058#1077#1089#1090' '#1089#1086#1077#1076#1080#1085#1077#1085#1080#1103
-      TabOrder = 5
+      TabOrder = 6
       OnClick = btnTestClick
+    end
+    object edApiKey: TcxTextEdit
+      Left = 85
+      Top = 162
+      Style.BorderColor = clWindowFrame
+      Style.BorderStyle = ebs3D
+      Style.HotTrack = False
+      Style.TransparentBorder = False
+      TabOrder = 5
+      Width = 378
+    end
+    object btnGenerateApiKey: TButton
+      Left = 132
+      Top = 241
+      Width = 161
+      Height = 25
+      Caption = #1057#1075#1077#1085#1077#1088#1080#1088#1086#1074#1072#1090#1100' API '#1082#1083#1102#1095
+      TabOrder = 7
+      OnClick = btnGenerateApiKeyClick
     end
     object lcConnectionSettingsGroup_Root: TdxLayoutGroup
       AlignHorz = ahClient
       AlignVert = avClient
       Hidden = True
-      ItemIndex = 5
       ShowBorder = False
       Index = -1
     end
@@ -134,7 +151,7 @@ object formServerSettings: TformServerSettings
       CaptionOptions.Text = 'New Group'
       LayoutDirection = ldHorizontal
       ShowBorder = False
-      Index = 5
+      Index = 6
     end
     object liOk: TdxLayoutItem
       Parent = lgAction
@@ -146,7 +163,7 @@ object formServerSettings: TformServerSettings
       ControlOptions.OriginalHeight = 25
       ControlOptions.OriginalWidth = 104
       ControlOptions.ShowBorder = False
-      Index = 1
+      Index = 2
     end
     object liLogin: TdxLayoutItem
       Parent = lcConnectionSettingsGroup_Root
@@ -192,6 +209,25 @@ object formServerSettings: TformServerSettings
       ControlOptions.OriginalWidth = 113
       ControlOptions.ShowBorder = False
       Index = 0
+    end
+    object liApiKey: TdxLayoutItem
+      Parent = lcConnectionSettingsGroup_Root
+      CaptionOptions.Text = 'API '#1082#1083#1102#1095
+      Control = edApiKey
+      ControlOptions.OriginalHeight = 23
+      ControlOptions.OriginalWidth = 121
+      ControlOptions.ShowBorder = False
+      Index = 5
+    end
+    object dxLayoutItem1: TdxLayoutItem
+      Parent = lgAction
+      CaptionOptions.Text = 'Button1'
+      CaptionOptions.Visible = False
+      Control = btnGenerateApiKey
+      ControlOptions.OriginalHeight = 25
+      ControlOptions.OriginalWidth = 161
+      ControlOptions.ShowBorder = False
+      Index = 1
     end
   end
 end

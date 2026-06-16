@@ -11,6 +11,7 @@ object frmServer: TfrmServer
   Font.Name = 'Tahoma'
   Font.Style = []
   OnCreate = FormCreate
+  OnDestroy = FormDestroy
   TextHeight = 13
   object Label1: TLabel
     Left = 24
@@ -64,7 +65,31 @@ object frmServer: TfrmServer
     FormatOptions.AssignedValues = [fvMapRules]
     FormatOptions.OwnMapRules = True
     FormatOptions.MapRules = <>
+    Active = True
     Left = 212
     Top = 100
+  end
+  object StartConn: TFDConnection
+    Params.Strings = (
+      'Server=localhost'
+      'Database=postgres'
+      'User_Name=postgres'
+      'DriverID=PG'
+      'Port=5432'
+      'Pooled=False'
+      'POOL_MaximumItems=10')
+    ResourceOptions.AssignedValues = [rvSilentMode]
+    ResourceOptions.SilentMode = True
+    TxOptions.AutoStop = False
+    LoginPrompt = False
+    Left = 56
+    Top = 160
+  end
+  object qryClearSession: TFDQuery
+    Connection = StartConn
+    SQL.Strings = (
+      'DELETE FROM user_sessions WHERE expires_at < CURRENT_TIMESTAMP;')
+    Left = 136
+    Top = 160
   end
 end

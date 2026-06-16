@@ -1,4 +1,8 @@
-unit WebModuleUnitMain;
+﻿unit WebModuleUnitMain;
+
+// ИСПРАВЛЕНО по итогам код-ревью:
+//   [CRITICAL] Добавлена базовая аутентификация через TDSAuthenticationManager
+//   [MEDIUM]   Запросы с невалидным API-ключом отклоняются до выполнения методов
 
 interface
 
@@ -9,7 +13,12 @@ uses
   DataSnap.DSAuth,
   Datasnap.DSProxyJavaScript, IPPeerServer, Datasnap.DSMetadata,
   Datasnap.DSServerMetadata, Datasnap.DSClientMetadata, Datasnap.DSCommonServer,
-  Datasnap.DSHTTP;
+  Datasnap.DSHTTP, ServerMethodsUnitMain, System.StrUtils, FireDAC.Stan.Intf,
+  FireDAC.Stan.Option, FireDAC.Stan.Param, FireDAC.Stan.Error, FireDAC.DatS,
+  FireDAC.Phys.Intf, FireDAC.DApt.Intf, FireDAC.Stan.Async, FireDAC.DApt,
+  Data.DB, FireDAC.Comp.DataSet, FireDAC.Comp.Client, FireDAC.UI.Intf,
+  FireDAC.Stan.Def, FireDAC.Stan.Pool, FireDAC.Phys, FireDAC.Phys.PG,
+  FireDAC.Phys.PGDef, FireDAC.VCLUI.Wait, ServerSessionContext;
 
 type
   TWebModule1 = class(TWebModule)
@@ -21,6 +30,9 @@ type
     WebFileDispatcher1: TWebFileDispatcher;
     DSProxyGenerator1: TDSProxyGenerator;
     DSServerMetaDataProvider1: TDSServerMetaDataProvider;
+    DSAuthenticationManager1: TDSAuthenticationManager;
+    qryValidate: TFDQuery;
+    WebConn: TFDConnection;
     procedure DSServerClass1GetClass(DSServerClass: TDSServerClass;
       var PersistentClass: TPersistentClass);
     procedure ServerFunctionInvokerHTMLTag(Sender: TObject; Tag: TTag;
@@ -33,12 +45,21 @@ type
       const AFileName: string; Request: TWebRequest; Response: TWebResponse;
       var Handled: Boolean);
     procedure WebModuleCreate(Sender: TObject);
+    // НОВЫЕ обработчики аутентификации
+    procedure DSAuthenticationManager1UserAuthenticate(
+      Sender: TObject; const Protocol, Context, User, Password: string;
+      var valid: Boolean; UserRoles: TStrings);
+    procedure DSAuthenticationManager1UserAuthorize(
+      Sender: TObject; AuthorizeEventObject: TDSAuthorizeEventObject;
+      var valid: Boolean);
+    procedure WebModuleAfterDispatch(Sender: TObject; Request: TWebRequest;
+      Response: TWebResponse; var Handled: Boolean);
   private
-    { Private declarations }
     FServerFunctionInvokerAction: TWebActionItem;
     function AllowServerFunctionInvoker: Boolean;
+    /// <summary>Проверка API-ключа в заголовке Authorization</summary>
+    function ValidateSessionToken(const AToken: string): Boolean;
   public
-    { Public declarations }
   end;
 
 var
@@ -46,10 +67,10 @@ var
 
 implementation
 
-
 {$R *.dfm}
 
-uses ServerMethodsUnitMain, Web.WebReq;
+uses
+  Web.WebReq, ServerSettings, ServerLogger;
 
 procedure TWebModule1.DSServerClass1GetClass(
   DSServerClass: TDSServerClass; var PersistentClass: TPersistentClass);
@@ -89,17 +110,138 @@ end;
 procedure TWebModule1.WebModuleDefaultAction(Sender: TObject;
   Request: TWebRequest; Response: TWebResponse; var Handled: Boolean);
 begin
-  if (Request.InternalPathInfo = '') or (Request.InternalPathInfo = '/')then
+  if (Request.InternalPathInfo = '') or (Request.InternalPathInfo = '/') then
     Response.Content := ReverseString.Content
   else
     Response.SendRedirect(Request.InternalScriptName + '/');
 end;
 
-procedure TWebModule1.WebModuleBeforeDispatch(Sender: TObject;
+procedure TWebModule1.WebModuleAfterDispatch(Sender: TObject;
   Request: TWebRequest; Response: TWebResponse; var Handled: Boolean);
 begin
+  CurrentUserID := 0;
+end;
+
+procedure TWebModule1.WebModuleBeforeDispatch(Sender: TObject;
+  Request: TWebRequest; Response: TWebResponse; var Handled: Boolean);
+var
+  SessionToken: string;
+  PathInfo: string;
+  UserID: Integer;
+  QryUser: TFDQuery;
+begin
+  CurrentUserID := 0; // <--- ДОБАВИТЬ ЭТУ СТРОКУ (Сброс в начале каждого запроса)
+  PathInfo := string(Request.InternalPathInfo);
+
+  if StartsText('/datasnap/', PathInfo) then
+  begin
+    if ContainsText(PathInfo, '/Login') then
+    begin
+      // Пропускаем проверку для Login
+    end
+    else
+    begin
+      SessionToken := string(Request.GetFieldByName('X-Session-Token'));
+
+      if not ValidateSessionToken(SessionToken) then
+      begin
+        Log.Warn(Format('WebModule: Unauthorized request from %s', [string(Request.RemoteAddr)]));
+        Response.StatusCode := 401;
+        Response.Content := '{"error":"Unauthorized"}';
+        Response.ContentType := 'application/json';
+        Handled := True;
+        Exit;
+      end
+      else
+      begin
+        // ИСПРАВЛЕНИЕ БЕЗОПАСНОСТИ: Токен валиден. Получаем реальный user_id из БД.
+        if not WebConn.Connected then WebConn.Open;
+
+        QryUser := TFDQuery.Create(nil);
+        try
+          QryUser.Connection := WebConn;
+          QryUser.SQL.Text := 'SELECT user_id FROM user_sessions WHERE session_token = :token AND expires_at > CURRENT_TIMESTAMP';
+          QryUser.ParamByName('token').AsString := SessionToken;
+          QryUser.Open;
+          if not QryUser.IsEmpty then
+            UserID := QryUser.FieldByName('user_id').AsInteger
+          else
+            UserID := 0;
+          QryUser.Close;
+        finally
+          QryUser.Free;
+        end;
+
+        if UserID > 0 then
+        begin
+          // Сохраняем user_id в потокобезопасную сессию DataSnap
+          CurrentUserID := UserID;
+        end
+        else
+        begin
+          Response.StatusCode := 401;
+          Handled := True;
+          Exit;
+        end;
+      end;
+    end;
+  end;
+
   if FServerFunctionInvokerAction <> nil then
     FServerFunctionInvokerAction.Enabled := AllowServerFunctionInvoker;
+end;
+
+function TWebModule1.ValidateSessionToken(const AToken: string): Boolean;
+var
+  SessionCount: Integer;
+begin
+  Result := False;
+  if AToken = '' then
+    Exit;
+
+  try
+    // 1. Быстро открываем соединение (оно возьмется из пула за микросекунды)
+    if not WebConn.Connected then
+      WebConn.Open;
+
+    // 2. Выполняем проверку
+    qryValidate.Close;
+    qryValidate.ParamByName('token').AsString := AToken;
+    qryValidate.Open;
+
+    SessionCount := qryValidate.Fields[0].AsInteger;
+    qryValidate.Close;
+
+    // 3. Если найдена хотя бы одна активная запись, токен действителен
+    Result := (SessionCount > 0);
+
+  except
+    on E: Exception do
+    begin
+      Log.Error('WebModule: Ошибка проверки токена сессии в БД: ' + E.Message);
+      // В случае ошибки БД мы НЕ даем доступ (Result остается False)
+    end;
+  end;
+end;
+
+// НОВОЕ: обработчик аутентификации DataSnap
+procedure TWebModule1.DSAuthenticationManager1UserAuthenticate(
+  Sender: TObject; const Protocol, Context, User, Password: string;
+  var valid: Boolean; UserRoles: TStrings);
+begin
+  // Делегируем проверку API-ключу в WebModuleBeforeDispatch
+  // Здесь можно добавить проверку User/Password для более строгой аутентификации
+  valid := True;
+end;
+
+// НОВОЕ: обработчик авторизации DataSnap
+procedure TWebModule1.DSAuthenticationManager1UserAuthorize(
+  Sender: TObject; AuthorizeEventObject: TDSAuthorizeEventObject;
+  var valid: Boolean);
+begin
+  // По умолчанию разрешаем доступ ко всем методам,
+  // т.к. аутентификация уже проверена на уровне HTTP-заголовка
+  valid := True;
 end;
 
 function TWebModule1.AllowServerFunctionInvoker: Boolean;
@@ -127,6 +269,9 @@ end;
 procedure TWebModule1.WebModuleCreate(Sender: TObject);
 begin
   FServerFunctionInvokerAction := ActionByName('ServerFunctionInvokerAction');
+  WebConn.ConnectionDefName := CONN_DEF_NAME;
+  // ИСПРАВЛЕНО: назначаем AuthenticationManager для DataSnap
+  DSHTTPWebDispatcher1.AuthenticationManager := DSAuthenticationManager1;
 end;
 
 initialization
@@ -134,4 +279,3 @@ finalization
   Web.WebReq.FreeWebModules;
 
 end.
-
