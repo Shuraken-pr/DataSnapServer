@@ -7,16 +7,18 @@
 ## ✨ Ключевые особенности и архитектурные решения
 
 ### 🔒 Безопасность (Security)
-* **Windows DPAPI:** Пароли от БД и служебные ключи хранятся в `db_settings.xml` в зашифрованном виде. Расшифровка возможна только на той же машине/под той же учетной записью Windows, где было произведено шифрование.
+* **Windows DPAPI:** Пароли от БД и API-ключи хранятся в `db_settings.xml` в зашифрованном виде. Используется флаг `CRYPTPROTECT_LOCAL_MACHINE` — расшифровка возможна только на том же компьютере, где было произведено шифрование (любым пользователем на этой машине).
 * **Сессионная аутентификация:** Вместо статических ключей используется механизм временных токенов (GUID) с ограниченным временем жизни (TTL), хранящихся в таблице `user_sessions`.
 * **Защита от подмены данных (Privilege Escalation):** Сервер **полностью игнорирует** поле `user_id`, передаваемое клиентом в JSON-теле запроса. Реальный `user_id` извлекается исключительно из валидной сессии и принудительно подставляется в SQL-запрос.
-* **Timing-Safe сравнение:** Реализовано побитовое XOR-сравнение строк для защиты от атак по времени отклика (Timing Attacks).
+* **Ограничения размера запроса:** Входящий JSON-пакет ограничен 1 МБ (`MAX_JSON_LENGTH = 1048576`). Массив событий — не более 1000 элементов (`MAX_ARRAY_ITEMS = 1000`). Превышение любого лимита немедленно отклоняется.
+* **Сокрытие внутренних ошибок:** При сбоях БД клиент получает только generic-сообщение (`"Database operation failed"`). Детали ошибки (`E.Message`) записываются только в серверный лог и никогда не передаются наружу.
+* **API-ключ:** Автоматически генерируемый 32-символьный ключ (`RtlGenRandom` из Advapi32.dll) для машинной аутентификации. Хранится в `db_settings.xml` в зашифрованном (DPAPI) виде. Доступен для генерации через UI формы настроек.
 
 ### ⚡ Производительность и Надежность
-* **Потокобезопасность FireDAC:** Для класса `TDSServerClass` установлен жизненный цикл **`LifeCycle = Invocation`**. Это гарантирует создание нового, изолированного экземпляра `TServerMethods1` (со своими компонентами `TFDConnection` и `TFDQuery`) для *каждого* HTTP-запроса, исключая гонки данных (Race Conditions).
-* **Асинхронное логирование:** Интегрирована библиотека **LoggerPro**. Запись логов происходит в фоновом потоке с автоматической ротацией файлов (макс. 15 файлов по 10 МБ), что не блокирует обработку клиентских запросов.
+* **Потокобезопасность FireDAC:** Для класса `TDSServerClass` установлен жизненный цикл **`LifeCycle = Invocation`**. Это гарантирует создание нового, изолированного экземпляра `TServerMethods1` (со своими компонентами `TFDConnection` и `TFDQuery`) для *каждого* HTTP-запроса, исключая гонки данных (Race Conditions). Соединения берутся из пула (`Pooled = True`, `PoolMaximumItems = 10`, имя пула — `PgServerConn`).
+* **Асинхронное логирование:** Интегрирована библиотека **LoggerPro** (минимальный уровень `Info`). Запись логов происходит в фоновом потоке с автоматической ротацией файлов (макс. 15 файлов по 10 МБ), что не блокирует обработку клиентских запросов.
 * **Оптимизированный парсинг JSON:** Метод `updateSyncUpload` корректно обрабатывает три возможных формата входящего JSON (строка в обертке, массив в обертке, прямой массив) с гарантированным предотвращением утечек памяти (Memory Leaks).
-* **Автоочистка сессий:** При старте сервер автоматически выполняет удаление просроченных записей из таблицы `user_sessions`.
+* **Автоочистка сессий:** При старте сервер автоматически выполняет удаление просроченных записей из таблицы `user_sessions` (см. SQL ниже).
 
 ---
 
@@ -29,10 +31,10 @@ DataSnapServer/
     ├── ServerMethodsUnitMain.pas # Бизнес-логика: Login, парсинг JSON, транзакции, SQL-инсерты
     ├── WebModuleUnitMain.pas     # HTTP-перехватчик: проверка токенов, извлечение user_id в threadvar
     ├── ServerSessionContext.pas  # Объявление threadvar CurrentUserID для безопасной межмодульной передачи
-    ├── ServerSettings.pas        # Конфигурация: чтение/запись XML, вызов WinDPAPIUtils
-    ├── ServerLogger.pas          # Инициализация глобального экземпляра LoggerPro
-    ├── WinDPAPIUtils.pas         # Обертка над Crypt32.dll (CryptProtectData / CryptUnprotectData)
-    └── frmServerSettings.pas     # UI формы настроек с кнопкой "Тест соединения"
+    ├── ServerSettings.pas        # Конфигурация: чтение/запись XML, генерация API-ключа (RtlGenRandom), вызов WinDPAPIUtils
+    ├── ServerLogger.pas          # Инициализация глобального экземпляра LoggerPro (мин. уровень Info, ротация 15×10 МБ)
+    ├── WinDPAPIUtils.pas         # Обертка над Crypt32.dll (CryptProtectData / CryptUnprotectData, флаг CRYPTPROTECT_LOCAL_MACHINE)
+    └── frServerSettings.pas      # UI формы настроек: тест соединения, генерация API-ключа, сброс флага теста при изменении полей
 ```
 
 ---
@@ -51,17 +53,15 @@ DataSnapServer/
 Перед запуском сервера выполните следующий SQL-скрипт в вашей базе данных для создания необходимых таблиц и индексов:
 
 ```sql
--- 1. Таблица пользователей (для первичной аутентификации)
-CREATE TABLE users (
-    id SERIAL PRIMARY KEY,
-    username VARCHAR(50) UNIQUE NOT NULL,
-    password VARCHAR(255) NOT NULL -- В продакшене рекомендуется хранить хэш (bcrypt/SHA-256)
-);
+-- 1. Аутентификация использует встроенные учётные записи PostgreSQL (pg_user).
+--    Отдельная таблица users НЕ требуется: Login подключается к БД от имени
+--    указанного пользователя и извлекает usesysid из системного каталога.
+--    В дальнейшем рекомендуется создать собственную таблицу с хэшированием паролей (bcrypt/Argon2).
 
 -- 2. Таблица активных сессий
 CREATE TABLE user_sessions (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL,  -- ID из pg_user.usesysid
     session_token VARCHAR(64) UNIQUE NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP NOT NULL
@@ -78,6 +78,9 @@ CREATE TABLE events (
     occurred_at TIMESTAMP NOT NULL,
     metadata JSONB
 );
+
+-- 4. Очистка просроченных сессий (выполняется при старте сервера)
+DELETE FROM user_sessions WHERE expires_at < CURRENT_TIMESTAMP;
 ```
 
 ---
@@ -167,7 +170,7 @@ POST /datasnap/rest/TServerMethods1/updateSyncUpload
 **Response (401 Unauthorized):**
 ```json
 {
-  "error": "Unauthorized: invalid or expired session token"
+  "error": "Unauthorized: session expired or invalid"
 }
 ```
 
@@ -183,7 +186,7 @@ POST /datasnap/rest/TServerMethods1/updateSyncUpload
 
 ## 🔮 Roadmap (Планы развития)
 
-- [ ] Переход на криптографическое хеширование паролей (bcrypt или Argon2) в таблице `users` вместо хранения в открытом виде.
+- [ ] Создание собственной таблицы `users` с криптографическим хешированием паролей (bcrypt или Argon2) взамен аутентификации через `pg_user`.
 - [ ] Настройка фоновой задачи `pg_cron` в PostgreSQL для регулярной очистки просроченных сессий (в дополнение к очистке при старте сервера).
 - [ ] Внедрение HTTPS/TLS: настройка `TIdServerIOHandlerSSLOpenSSL` или использование Reverse Proxy (Nginx/Apache) для шифрования всего входящего трафика.
 - [ ] Расширенный алертинг: отправка уведомлений о критических ошибках (Fatal) в Telegram или по электронной почте через дополнительные аппендеры LoggerPro.

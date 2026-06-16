@@ -3,7 +3,7 @@
 interface
 
 uses
-  System.SysUtils, System.Classes, System.NetEncoding, Xml.XMLDoc, Xml.XMLIntf,
+  System.SysUtils, System.Classes, Xml.XMLDoc, Xml.XMLIntf,
   System.IOUtils;
 
 type
@@ -46,8 +46,8 @@ const
 implementation
 
 // Важно: добавляем FireDAC для создания тестового соединения
-uses FireDAC.Comp.Client, FireDAC.Phys.PG, Variants, Dialogs,
-  WinDPAPIUtils, ServerLogger;
+uses FireDAC.Comp.Client, FireDAC.Phys.PG, Variants,
+  WinDPAPIUtils, ServerLogger, Winapi.Windows;
 
 { TServerSettings }
 var
@@ -64,20 +64,25 @@ begin
   FApiKey := '';
 end;
 
+function RtlGenRandom(RandomBuffer: Pointer; RandomBufferLength: Cardinal): BOOL;
+  stdcall; external 'Advapi32.dll' name 'SystemFunction036';
+
 class function TServerSettings.GenerateSecureApiKey: string;
 const
-  // Набор символов для ключа (без похожих символов вроде O/0, l/1 для удобства чтения, если потребуется)
   Chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
 var
-  I: Integer;
+  I, Idx: Integer;
+  Buf: array[0..31] of Byte;
 begin
   Result := '';
-  // Randomize обычно вызывается один раз при старте приложения, но здесь это страховка
-  Randomize;
-  for I := 1 to 32 do
-    Result := Result + Chars[Random(Length(Chars)) + 1];
+  if not RtlGenRandom(@Buf[0], SizeOf(Buf)) then
+    RaiseLastOSError;
+  for I := 0 to 31 do
+  begin
+    Idx := Buf[I] mod Length(Chars);
+    Result := Result + Chars[Idx + 1];
+  end;
 end;
-
 function TServerSettings.GetApiKey: string;
 begin
   Result := FApiKey;
@@ -168,7 +173,7 @@ begin
     try
       Conn.Open;
       Result := True;
-      Log.Debug('Тестовое подключение к БД успешно.'); // Debug уровень
+      Log.Info('Тестовое подключение к БД успешно.');
     except
       on E: Exception do
       begin

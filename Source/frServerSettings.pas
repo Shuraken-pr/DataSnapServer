@@ -77,6 +77,7 @@ begin
     frm.edDatabase.Text := ASettings.Database;
     frm.edLogin.Text := ASettings.Username;
     frm.edPassword.Text := ASettings.Password;
+    frm.edApiKey.Text := ASettings.ApiKey;
     frm.FTestPassed := False;
 
     Result := (frm.ShowModal = mrOk);
@@ -93,6 +94,7 @@ begin
   edDatabase.Properties.OnChange := FieldChange;
   edLogin.Properties.OnChange := FieldChange;
   edPassword.Properties.OnChange := FieldChange;
+  edApiKey.Properties.OnChange := FieldChange;
 end;
 
 // ИСПРАВЛЕНО: при любом изменении полей — сбрасываем флаг пройденного теста,

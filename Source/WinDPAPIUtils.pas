@@ -61,7 +61,7 @@ begin
   end
     else
   begin
-    Log.Error(Format('ServerSettings.EncryptPwd: CryptProtectData failed, code=%d', [GetLastError]));
+    Log.Error(Format('WinDPAPIUtils.EncryptString: CryptProtectData failed, code=%d', [GetLastError]));
   end;
 end;
 
@@ -91,7 +91,7 @@ begin
   end
     else
   begin
-    Log.Error(Format('ServerSettings.DecryptPwd: CryptProtectData failed, code=%d', [GetLastError]));
+    Log.Error(Format('WinDPAPIUtils.DecryptString: CryptProtectData failed, code=%d', [GetLastError]));
   end;
 end;
 

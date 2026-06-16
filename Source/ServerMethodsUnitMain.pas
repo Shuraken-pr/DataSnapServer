@@ -174,13 +174,13 @@ end;
 
 function TServerMethods1.updateSyncUpload(const AJsonData: string): string;
 var
-  RootVal, InnerVal: TJSONValue;
+  RootVal: TJSONValue;
   Arr: TJSONArray;
   I: Integer;
   Item, Details: TJSONObject;
   DetailsVal: TJSONValue;
   EType: TJSONValue;
-  OccurredAtStr: string;
+  NestedJson, OccurredAtStr: string;
   OccurredAt: TDateTime;
   AuthUserID: Integer;
 begin
@@ -199,9 +199,9 @@ begin
     // Вариант 1: Обертка со строкой {"AJsonData": "[{...}]"}
     if (RootVal is TJSONObject) and (TJSONObject(RootVal).GetValue('AJsonData') is TJSONString) then
     begin
-      OccurredAtStr := TJSONObject(RootVal).GetValue('AJsonData').Value;
+      NestedJson := TJSONObject(RootVal).GetValue('AJsonData').Value;
       RootVal.Free; // Освобождаем обертку
-      RootVal := TJSONObject.ParseJSONValue(OccurredAtStr); // Парсим внутреннюю строку
+      RootVal := TJSONObject.ParseJSONValue(NestedJson); // Парсим внутреннюю строку
       if not Assigned(RootVal) then
         Exit(BuildJsonResult('error', 'Invalid nested JSON'));
 
@@ -276,10 +276,7 @@ begin
           // 🔑 ИСПРАВЛЕНИЕ 2: Используем распарсенный OccurredAt, а не Now
           qryInsert.ParamByName('otime').AsDateTime := OccurredAt;
 
-          if Details <> nil then
-            qryInsert.ParamByName('meta').AsString := Details.ToString
-          else
-            qryInsert.ParamByName('meta').AsString := '{}';
+          qryInsert.ParamByName('meta').AsString := Details.ToString;
 
           qryInsert.ExecSQL;
         end;
@@ -297,7 +294,7 @@ begin
             on ERoll: Exception do
               Log.Error('Ошибка отката транзакции: ' + ERoll.Message);
           end;
-          Result := BuildJsonResult('error', 'Database operation failed: ' + E.Message);
+          Result := BuildJsonResult('error', 'Database operation failed');
         end;
       end;
     except
