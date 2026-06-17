@@ -35,6 +35,12 @@
         <Cfg_1>true</Cfg_1>
         <Base>true</Base>
     </PropertyGroup>
+    <PropertyGroup Condition="('$(Platform)'=='Win64' and '$(Cfg_1)'=='true') or '$(Cfg_1_Win64)'!=''">
+        <Cfg_1_Win64>true</Cfg_1_Win64>
+        <CfgParent>Cfg_1</CfgParent>
+        <Cfg_1>true</Cfg_1>
+        <Base>true</Base>
+    </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Release' or '$(Cfg_2)'!=''">
         <Cfg_2>true</Cfg_2>
         <CfgParent>Base</CfgParent>
@@ -42,6 +48,12 @@
     </PropertyGroup>
     <PropertyGroup Condition="('$(Platform)'=='Win32' and '$(Cfg_2)'=='true') or '$(Cfg_2_Win32)'!=''">
         <Cfg_2_Win32>true</Cfg_2_Win32>
+        <CfgParent>Cfg_2</CfgParent>
+        <Cfg_2>true</Cfg_2>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="('$(Platform)'=='Win64' and '$(Cfg_2)'=='true') or '$(Cfg_2_Win64)'!=''">
+        <Cfg_2_Win64>true</Cfg_2_Win64>
         <CfgParent>Cfg_2</CfgParent>
         <Cfg_2>true</Cfg_2>
         <Base>true</Base>
@@ -72,6 +84,12 @@ $(PostBuildEvent)]]></PostBuildEvent>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base_Win64)'!=''">
         <DCC_UsePackage>dxPScxExtCommonRS29;dxRichEditControlCoreRS29;vclie;bindengine;IndyIPCommon;cxVerticalGridRS29;dbxcds;vcledge;cxSchedulerWebServiceStorageRS29;dxRichEditControlRS29;dxPsPrVwAdvRS29;dxPSdxGaugeControlLnkRS29;dxRibbonCustomizationFormRS29;dbexpress;dxEMFRS29;inet;vcltouch;dxPSdxFCLnkRS29;FireDACDBXDriver;dxSpreadSheetCoreConditionalFormattingDialogsRS29;CustomIPTransport;FireDACMSSQLDriver;dxPScxTLLnkRS29;VirtualTreesR;vclFireDAC;dxSpreadSheetRS29;FireDACODBCDriver;emsserverresource;dxPScxVGridLnkRS29;ZComponent;FMX.dxLayoutControlR;rtl;dxServerModeRS29;DBXSqliteDriver;dxBarDBNavRS29;DBXSybaseASEDriver;inetdbxpress;FireDAC;xmlrtl;dsnap;FireDACDb2Driver;dxPSdxLCLnkRS29;DBXOracleDriver;DatasnapConnectorsFreePascal;dxPSLnksRS29;dxPSdxOCLnkRS29;cxSchedulerGridRS29;dxPSdxDBTVLnkRS29;dxGaugeControlRS29;bindcompvclwinx;dxOrgChartAdvancedCustomizeFormRS29;bindcompfmx;dxFlowChartLayoutsRS29;dxdborRS29;FireDACASADriver;dxPScxGridLnkRS29;vclactnband;officeXPrt;FireDACInfxDriver;dxRichEditCoreRS29;DBXMySQLDriver;dxFlowChartAdvancedCustomizeFormRS29;VclSmp;DataSnapCommon;fmxase;dxFlowChartRS29;cxGridRS29;dxSpellCheckerRS29;DataSnapIndy10ServerTransport;dxMapControlRS29;vcldsnap;DBXInterBaseDriver;vcldb;cxSchedulerTreeBrowserRS29;dxTabbedMDIRS29;ZPlain;dxHttpIndyRequestRS29;cxPivotGridOLAPRS29;vcl;DataSnapClient;dxCoreRS29;dxSkinsCoreRS29;emsclientfiredac;FireDACPgDriver;FireDACDSDriver;tethering;FMX.dxMemDataR;bindcompvcl;FMX.dxGridR;CloudService;cxSchedulerRS29;soapserver;dxPScxCommonRS29;FireDACIBDriver;dxRibbonRS29;vclwinx;DataSnapServer;frReportFiles;fmx;dxSpreadSheetReportDesignerRS29;DbxCommonDriver;VCLRESTComponents;FireDACCommonODBC;DBXMSSQLDriver;dxComnRS29;emsclient;dxFlowChartDesignerRS29;appanalytics;IndyProtocols;vclx;dxBarExtDBItemsRS29;cxFireDACAdaptersRS29;DBXFirebirdDriver;FireDACSqliteDriver;DbxClientDriver;soapmidas;dxDockingRS29;dxorgcRS29;fmxdae;dxPSRichEditControlLnkRS29;dxPSdxSpreadSheetLnkRS29;ZCore;ZParseSql;cxADOAdaptersRS29;dxPSPrVwRibbonRS29;IndySystem;dxPSdxDBOCLnkRS29;dxGDIPlusRS29;dxPSCoreRS29;FireDACCommon;DataSnapServerMidas;dxPSdxMapControlLnkRS29;cxGridEMFRS29;dxGanttControlRS29;dxPScxPivotGridLnkRS29;dxADOServerModeRS29;dxWizardControlRS29;bindcompdbx;FireDACMySQLDriver;dxCloudServiceLibraryRS29;dxSpreadSheetCoreRS29;dxNavBarRS29;vclimg;DataSnapFireDAC;dxFireDACEMFRS29;DBXInformixDriver;fmxobj;bindcompvclsmp;DataSnapNativeClient;dxmdsRS29;dxPScxSchedulerLnkRS29;emshosting;dxADOEMFRS29;dxChartControlRS29;FireDACCommonDriver;IndyIPClient;dxPDFViewerRS29;emsedge;dxBarExtItemsRS29;inetdb;cxPivotGridChartRS29;fmxFireDAC;cxTreeListdxBarPopupMenuRS29;cxSchedulerRibbonStyleEventEditorRS29;dxtrmdRS29;DBXOdbcDriver;dbrtl;dxPScxPCProdRS29;FireDACOracleDriver;FMX.dxControlsR;FireDACMSAccDriver;dxRichEditDocumentModelRS29;DataSnapConnectors;FireDACMongoDBDriver;FireDACTDataDriver;cxLibraryRS29;Skia.Package.VCL;dxPSdxPDFViewerLnkRS29;bindcomp;cxExportRS29;IndyCore;RESTBackendComponents;dxTileControlRS29;dxFireDACServerModeRS29;FireDACADSDriver;RESTComponents;IndyIPServer;dsnapxml;adortl;dxdbtrRS29;dsnapcon;cxPivotGridRS29;DataSnapProviderClient;DBXDb2Driver;dxBarRS29;ZDbc;DBXSybaseASADriver;dxSpreadSheetConditionalFormattingDialogsRS29;cxTreeListRS29;soaprtl;dxDBXServerModeRS29;$(DCC_UsePackage)</DCC_UsePackage>
+        <DCC_Namespace>Winapi;System.Win;Data.Win;Datasnap.Win;Web.Win;Soap.Win;Xml.Win;$(DCC_Namespace)</DCC_Namespace>
+        <BT_BuildType>Debug</BT_BuildType>
+        <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
+        <VerInfo_Keys>CompanyName=;FileDescription=$(MSBuildProjectName);FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProgramID=com.embarcadero.$(MSBuildProjectName);ProductName=$(MSBuildProjectName);ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
+        <VerInfo_Locale>1033</VerInfo_Locale>
+        <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_1)'!=''">
         <DCC_Define>DEBUG;$(DCC_Define)</DCC_Define>
@@ -90,6 +108,9 @@ $(PostBuildEvent)]]></PostBuildEvent>
         <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
         <VerInfo_Locale>1033</VerInfo_Locale>
     </PropertyGroup>
+    <PropertyGroup Condition="'$(Cfg_1_Win64)'!=''">
+        <AppDPIAwarenessMode>PerMonitorV2</AppDPIAwarenessMode>
+    </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_2)'!=''">
         <DCC_LocalDebugSymbols>false</DCC_LocalDebugSymbols>
         <DCC_Define>RELEASE;$(DCC_Define)</DCC_Define>
@@ -97,6 +118,9 @@ $(PostBuildEvent)]]></PostBuildEvent>
         <DCC_DebugInformation>0</DCC_DebugInformation>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_2_Win32)'!=''">
+        <AppDPIAwarenessMode>PerMonitorV2</AppDPIAwarenessMode>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Cfg_2_Win64)'!=''">
         <AppDPIAwarenessMode>PerMonitorV2</AppDPIAwarenessMode>
     </PropertyGroup>
     <ItemGroup>

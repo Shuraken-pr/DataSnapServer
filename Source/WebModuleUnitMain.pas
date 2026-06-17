@@ -131,6 +131,17 @@ begin
   CurrentUserID := 0; // <--- ДОБАВИТЬ ЭТУ СТРОКУ (Сброс в начале каждого запроса)
   PathInfo := string(Request.InternalPathInfo);
 
+  // 🔑 НОВОЕ: Если запрос идет на корень сайта (например, из браузера),
+  // отдаем простой JSON и прерываем дальнейшую обработку, чтобы не искать HTML-шаблоны.
+  if (PathInfo = '') or (PathInfo = '/') then
+  begin
+    Response.Content := '{"status": "ok", "message": "DataSnap REST Server is running securely via HTTPS"}';
+    Response.ContentType := 'application/json';
+    Response.StatusCode := 200;
+    Handled := True;
+    Exit;
+  end;
+
   if StartsText('/datasnap/', PathInfo) then
   begin
     if ContainsText(PathInfo, '/Login') then

@@ -20,6 +20,12 @@
 * **Оптимизированный парсинг JSON:** Метод `updateSyncUpload` корректно обрабатывает три возможных формата входящего JSON (строка в обертке, массив в обертке, прямой массив) с гарантированным предотвращением утечек памяти (Memory Leaks).
 * **Автоочистка сессий:** При старте сервер автоматически выполняет удаление просроченных записей из таблицы `user_sessions` (см. SQL ниже).
 
+### 🌐 Архитектура с Nginx Reverse Proxy
+* **HTTPS через Nginx:** Сервер работает в режиме HTTP на локальном порту (обычно 8082), а весь HTTPS-трафик обрабатывается Nginx как Reverse Proxy.
+* **Изоляция от интернета:** Сервер слушает только `127.0.0.1`, что делает его недоступным напрямую из внешней сети. Только Nginx имеет доступ к внутреннему порту.
+* **Упрощение кода:** Delphi-сервер не содержит кода для работы с SSL-сертификатами — вся криптография делегирована Nginx.
+* **Гибкость:** Легко заменить самоподписанный сертификат на настоящий (Let's Encrypt) без изменения кода сервера.
+
 ---
 
 ## 🏗️ Структура проекта
@@ -45,6 +51,7 @@ DataSnapServer/
 2. **PostgreSQL 13+** (с установленным расширением `pg_cron` для периодической очистки, опционально).
 3. **Библиотека LoggerPro:** Должна быть установлена через *Tools → GetIt Package Manager* или добавлена в *Library Path* (Необходимо скачать с https://github.com/danieleteti/loggerpro).
 4. **FireDAC:** Драйвер `libpq.dll` должен быть доступен в PATH системы или в папке с исполняемым файлом.
+5. **Nginx** (опционально, но рекомендуется): Для обработки HTTPS-трафика и работы в качестве Reverse Proxy.
 
 ---
 
@@ -87,13 +94,82 @@ DELETE FROM user_sessions WHERE expires_at < CURRENT_TIMESTAMP;
 
 ## 🚀 Запуск и конфигурация
 
+### 1. Настройка Delphi-сервера
+
 1. Скомпилируйте проект в Delphi.
 2. При **первом запуске** сервер автоматически откроет окно **"Настройка подключения"**.
 3. Введите параметры подключения к PostgreSQL (Host, Database, Username, Password).
 4. Нажмите **"Тест соединения"**. Если успешно, нажмите **OK**.
-5. Сервер сохранит настройки в файл `db_settings.xml` (пароль будет зашифрован через DPAPI) и запустит HTTP-слушатель.
+5. Сервер сохранит настройки в файл `db_settings.xml` (пароль будет зашифрован через DPAPI) и запустит HTTP-слушатель на указанном порту (по умолчанию 8082).
 
 > **Важно:** Если вы переносите исполняемый файл и `db_settings.xml` на другой компьютер, сервер не сможет расшифровать пароль и потребует настройки заново. Это ожидаемое поведение системы безопасности DPAPI.
+
+### 2. Настройка Nginx (Reverse Proxy)
+
+Для работы с HTTPS необходимо настроить Nginx как Reverse Proxy.
+
+#### 2.1. Генерация самоподписанного сертификата
+
+```bash
+openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+  -keyout /etc/nginx/key.pem \
+  -out /etc/nginx/cert.pem \
+  -subj "/CN=192.168.1.113" \
+  -addext "subjectAltName=IP:192.168.1.113"
+```
+
+*(Замените `192.168.1.113` на ваш реальный IP или домен)*
+
+#### 2.2. Конфигурация Nginx
+
+Создайте файл `/etc/nginx/sites-available/fieldaudit` (или `C:\nginx\conf\nginx.conf` на Windows):
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name 192.168.1.113;  # Замените на ваш IP или домен
+
+    # Пути к сертификатам
+    ssl_certificate     /etc/nginx/cert.pem;
+    ssl_certificate_key /etc/nginx/key.pem;
+    
+    # Настройки SSL
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    # Проксирование на Delphi-сервер
+    location / {
+        proxy_pass http://127.0.0.1:8082;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# Редирект с HTTP на HTTPS
+server {
+    listen 80;
+    server_name 192.168.1.113;
+    return 301 https://$host$request_uri;
+}
+```
+
+Активируйте сайт и перезапустите Nginx:
+```bash
+sudo ln -s /etc/nginx/sites-available/fieldaudit /etc/nginx/sites-enabled/
+sudo nginx -t          # Проверка конфигурации
+sudo systemctl reload nginx
+```
+
+#### 2.3. Альтернатива: Let's Encrypt (для продакшена)
+
+Если у вас есть публичный домен, используйте Certbot для получения настоящего сертификата:
+```bash
+sudo certbot --nginx -d your-domain.ru
+```
 
 ---
 
@@ -181,6 +257,7 @@ POST /datasnap/rest/TServerMethods1/updateSyncUpload
 1. **Логирование:** Токены сессии и пароли **никогда** не записываются в лог-файлы (`logs/DataSnapServer_*.log`) в открытом виде.
 2. **Изоляция запросов:** Благодаря настройке `LifeCycle = Invocation` в `DSServerClass1`, компоненты FireDAC не разделяются между потоками, что делает сервер устойчивым к конкурентным запросам.
 3. **Контекст пользователя:** Передача `user_id` осуществляется через `threadvar CurrentUserID` (модуль `ServerSessionContext.pas`). Это самый надежный и быстрый способ передачи контекста в архитектуре Indy + DataSnap, исключающий ошибки `Access Violation`, свойственные `TDSSessionManager`.
+4. **Сетевая изоляция:** Сервер слушает только `127.0.0.1`, что делает его недоступным напрямую из внешней сети. Только Nginx (работающий на той же машине) имеет доступ к внутреннему HTTP-порту.
 
 ---
 
@@ -188,8 +265,9 @@ POST /datasnap/rest/TServerMethods1/updateSyncUpload
 
 - [ ] Создание собственной таблицы `users` с криптографическим хешированием паролей (bcrypt или Argon2) взамен аутентификации через `pg_user`.
 - [ ] Настройка фоновой задачи `pg_cron` в PostgreSQL для регулярной очистки просроченных сессий (в дополнение к очистке при старте сервера).
-- [ ] Внедрение HTTPS/TLS: настройка `TIdServerIOHandlerSSLOpenSSL` или использование Reverse Proxy (Nginx/Apache) для шифрования всего входящего трафика.
 - [ ] Расширенный алертинг: отправка уведомлений о критических ошибках (Fatal) в Telegram или по электронной почте через дополнительные аппендеры LoggerPro.
+- [ ] Мониторинг производительности: интеграция с Prometheus/Grafana для отслеживания метрик (количество запросов, время отклика, размер пула соединений).
+- [ ] Rate limiting: защита от DDoS-атак через ограничение количества запросов с одного IP (через Nginx или встроенный механизм).
 
 ---
 

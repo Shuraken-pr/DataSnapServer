@@ -197,24 +197,31 @@ end;
 
 procedure TfrmServer.StartServer;
 var
-  Port: Integer;
+  CurPort: Integer;
 begin
-  if not FServer.Active then
+  if not Assigned(FServer) then
+    FServer := TIdHTTPWebBrokerBridge.Create(Self);
+
+  FServer.Bindings.Clear;
+
+  // 🔑 УПРОЩЕНИЕ: Никакого SSL! Nginx сам занимается HTTPS.
+  // Сервер слушает только локальный HTTP-порт.
+  CurPort := StrToIntDef(EditPort.Text, 0);
+  if (CurPort < 1) or (CurPort > 65535) then
   begin
-    FServer.Bindings.Clear;
-
-    // ИСПРАВЛЕНО: StrToInt заменён на StrToIntDef с проверкой диапазона
-    Port := StrToIntDef(EditPort.Text, 0);
-    if (Port < 1) or (Port > 65535) then
-    begin
-      ShowMessage('Порт должен быть числом от 1 до 65535');
-      Exit;
-    end;
-
-    FServer.DefaultPort := Port;
-    FServer.Active := True;
-    Log.Info(Format('StartServer: Server started on port %d', [Port]));
+    ShowMessage('Порт должен быть числом от 1 до 65535');
+    Exit;
   end;
+
+  with FServer.Bindings.Add do
+  begin
+    IP := '127.0.0.1'; // Только локальные подключения от Nginx
+    Port := CurPort;    // Обычно 8082
+  end;
+
+  FServer.DefaultPort := CurPort;
+  FServer.Active := True;
+  Log.Info(Format('StartServer: Server started in HTTP mode on port %d (behind Nginx)', [CurPort]));
 end;
 
 end.
