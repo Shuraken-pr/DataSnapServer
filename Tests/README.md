@@ -11,7 +11,9 @@
 | `TTestWinDPAPIUtils` | 5 | Шифрование/дешифрование через Windows DPAPI |
 | `TTestServerSettings` | 7 | Сохранение/загрузка настроек, генерация API-ключей |
 | `TTestJsonParsing` | 6 | Парсинг входящего JSON во всех поддерживаемых форматах |
-| **ИТОГО** | **18** | **100% успешное прохождение** ✅ |
+| `TTestUploadUtils` | 11 | Проверка JPEG-заголовка, SHA-256, генерация UUID, атомарное сохранение |
+| `TTestUploadPayloadParser` | 6 | Парсинг payload для endpoint `/upload`: Base64, координаты, метаданные |
+| **ИТОГО** | **35** | **100% успешное прохождение** ✅ |
 
 ## 🧪 Список тестов
 
@@ -51,22 +53,52 @@
 | `TestParseEmptyArray` | Пустой массив `[]` обрабатывается корректно |
 | `TestParseJsonWithMissingFields` | Отсутствие опциональных полей не вызывает ошибок |
 
+### TTestUploadUtils (11 тестов)
+Проверяет модуль `UploadUtils.pas`, отвечающий за обработку загруженных фотографий.
+
+| Имя теста | Что проверяет |
+|-----------|---------------|
+| `TestIsValidJpegMagic_Valid` | Корректное распознавание JPEG-заголовка (FF D8 FF) |
+| `TestIsValidJpegMagic_Invalid` | Отклонение не-JPEG файлов (PNG, и т.д.) |
+| `TestIsValidJpegMagic_Empty` | Обработка пустого потока |
+| `TestComputeSHA256_Deterministic` | Один и тот же контент даёт одинаковый хеш |
+| `TestComputeSHA256_Length` | SHA-256 возвращает ровно 64 hex-символа |
+| `TestGenerateFileUUID_Unique` | 100 последовательных UUID всегда различаются |
+| `TestGenerateFileUUID_Format` | Формат UUID: 36 символов без фигурных скобок |
+| `TestEnsureAuditDir_CreatesHierarchy` | Создаётся иерархия папок YYYY/MM/DD |
+| `TestEnsureAuditDir_YearMonthDay` | Путь содержит правильные год, месяц, день |
+| `TestSaveUploadedFile_Atomic` | Файл сохраняется атомарно (через .tmp → rename), .tmp не остаётся |
+| `TestSaveUploadedFile_Content` | Содержимое сохранённого файла совпадает с исходным |
+
+### TTestUploadPayloadParser (6 тестов)
+Проверяет парсинг JSON-payload для endpoint `/upload`.
+
+| Имя теста | Что проверяет |
+|-----------|---------------|
+| `TestValidPayload_AllFields` | Полный payload: Base64, координаты, метаданные |
+| `TestMissingPhotoBase64` | Отсутствие поля `photo_base64` корректно определяется |
+| `TestInvalidBase64` | Невалидный Base64 даёт пустой или некорректный результат |
+| `TestLargePhotoBase64` | Обработка больших файлов (5 MB → ~6.6 MB Base64) |
+| `TestGeoCoordinatesPrecision` | Точность координат до 7 знаков после запятой |
+| `TestMetadataExtraction` | Извлечение `device_id`, `batch_id`, `title`, `occurred_at` |
+
 ## 📈 Результаты тестирования
 
-Последний прогон (2026-06-18):
+Последний прогон (2026-06-19):
 
 ```
-Total tests: 18
-Passed:      18 ✅
+Total tests: 35
+Passed:      35 ✅
 Failed:      0
 Ignored:     0
-Time:        0.037s
+Time:        ~0.05s
 ```
 
 ### История исправлений
 
 | Дата | Тест | Описание изменения |
 |------|------|--------------------|
+| 2026-06-19 | Все тесты | Подключены `TestUploadUtils.pas` и `TestUploadPayloadParser.pas` к `TestRunner.dpr` |
 | 2026-06-18 | `TestDecryptInvalidData` | Изменено ожидание: функция возвращает пустую строку вместо выброса исключения (более безопасное поведение) |
 
 ## 🚀 Как запустить тесты
@@ -167,9 +199,11 @@ jobs:
 DataSnapServer/Tests/
 ├── TestRunner.dpr              # Главный файл проекта (открывать в Delphi)
 ├── TestRunner.dproj            # Настройки проекта (создаётся Delphi автоматически)
-├── TestWinDPAPIUtils.pas       # Тесты шифрования DPAPI
-├── TestServerSettings.pas      # Тесты настроек сервера
-├── TestServerMethods.pas       # Тесты парсинга JSON
+├── TestWinDPAPIUtils.pas       # Тесты шифрования DPAPI (✅ подключён)
+├── TestServerSettings.pas      # Тесты настроек сервера (✅ подключён)
+├── TestServerMethods.pas       # Тесты парсинга JSON (✅ подключён)
+├── TestUploadUtils.pas         # Тесты UploadUtils.pas (✅ подключён)
+├── TestUploadPayloadParser.pas # Тесты парсинга payload для /upload (✅ подключён)
 ├── dunitx-results.xml          # Отчёт о последнем прогоне (NUnit XML)
 └── README.md                   # Этот файл
 ```
@@ -180,7 +214,7 @@ DataSnapServer/Tests/
 |--------|---------------------------|
 | `ServerMethodsUnitMain.Login` | Требует реальной БД PostgreSQL — это интеграционный тест, а не модульный |
 | `ServerMethodsUnitMain.updateSyncUpload` | Требует реальной БД и настроенного соединения |
-| `WebModuleUnitMain` | Требует запущенного HTTP-сервера — тестируется через Postman/curl |
+| `WebModuleUnitMain` (endpoint `/upload`) | Требует запущенного HTTP-сервера — тестируется через Postman/curl |
 | `ServerLogger` | Асинхронное логирование сложно тестировать модульно |
 
 Для полноценного покрытия рекомендуется добавить **интеграционные тесты** с использованием тестовой БД PostgreSQL (Docker-контейнер с `postgres:15`).

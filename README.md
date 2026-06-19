@@ -35,11 +35,12 @@ DataSnapServer/
 └── Source/
     ├── FormUnitMain.pas          # Главная форма: инициализация FDManager, автоочистка сессий при старте
     ├── ServerMethodsUnitMain.pas # Бизнес-логика: Login, парсинг JSON, транзакции, SQL-инсерты
-    ├── WebModuleUnitMain.pas     # HTTP-перехватчик: проверка токенов, извлечение user_id в threadvar
+    ├── WebModuleUnitMain.pas     # HTTP-перехватчик: проверка токенов, endpoint /upload, извлечение user_id в threadvar
     ├── ServerSessionContext.pas  # Объявление threadvar CurrentUserID для безопасной межмодульной передачи
     ├── ServerSettings.pas        # Конфигурация: чтение/запись XML, генерация API-ключа (RtlGenRandom), вызов WinDPAPIUtils
     ├── ServerLogger.pas          # Инициализация глобального экземпляра LoggerPro (мин. уровень Info, ротация 15×10 МБ)
     ├── WinDPAPIUtils.pas         # Обертка над Crypt32.dll (CryptProtectData / CryptUnprotectData, флаг CRYPTPROTECT_LOCAL_MACHINE)
+    ├── UploadUtils.pas           # Утилиты для загрузки фото: проверка JPEG, SHA-256, генерация UUID, атомарное сохранение
     └── frServerSettings.pas      # UI формы настроек: тест соединения, генерация API-ключа, сброс флага теста при изменении полей
 ```
 
@@ -252,6 +253,55 @@ POST /datasnap/rest/TServerMethods1/updateSyncUpload
 
 ---
 
+### 3. Загрузка фотографий (Upload)
+Принимает фотографию в формате JPEG, сохраняет на диск и регистрирует в БД.
+
+**Endpoint:**
+```http
+POST /upload
+```
+
+**Headers:**
+| Key | Value | Description |
+| :--- | :--- | :--- |
+| `Content-Type` | `application/json` | Обязательно |
+| `X-Session-Token` | `{ваш_токен}` | Токен из метода `Login` |
+
+**Request Body (JSON):**
+```json
+{
+  "event_type": "mobile_audit",
+  "lat": 55.7558,
+  "lon": 37.6173,
+  "photo_base64": "/9j/4AAQSkZJRgABAQ...",
+  "photo_filename": "photo_20260619_143025.jpg",
+  "title": "Inspection Site A",
+  "device_id": "android",
+  "batch_id": "{86AB48DA-D896-4480-8BA8-99E620F05C5E}",
+  "occurred_at": "2026-06-19T14:30:00Z"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "result": "ok",
+  "file_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "checksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "url": "https://192.168.1.113/audit-files/2026/6/19/a1b2c3d4-e5f6-7890-abcd-ef1234567890.jpg"
+}
+```
+
+**Особенности реализации:**
+- Фото передаётся в Base64 внутри JSON (избегает проблем с multipart/кодировками)
+- Проверяется JPEG-заголовок (магические байты `FF D8 FF`)
+- Вычисляется SHA-256 хеш для контроля целостности
+- Файл сохраняется атомарно (через `.tmp` → `rename`)
+- Иерархия папок: `C:\AuditFiles\YYYY\MM\DD\{UUID}.jpg`
+- Запись в `audit_logs` (метаданные) и `audit_files` (информация о файле)
+
+---
+
 ## 🔒 Примечания по безопасности для администраторов
 
 1. **Логирование:** Токены сессии и пароли **никогда** не записываются в лог-файлы (`logs/DataSnapServer_*.log`) в открытом виде.
@@ -263,7 +313,7 @@ POST /datasnap/rest/TServerMethods1/updateSyncUpload
 
 ## 🧪 Автоматическое тестирование
 
-Проект покрыт **18 автоматическими модульными тестами** на фреймворке **DUnitX** со **100% успешным прохождением**.
+Проект покрыт **35 автоматическими модульными тестами** на фреймворке **DUnitX** со **100% успешным прохождением**.
 
 ### Покрытие тестами
 
@@ -272,7 +322,9 @@ POST /datasnap/rest/TServerMethods1/updateSyncUpload
 | `WinDPAPIUtils.pas` | 5 | Шифрование/дешифрование через Windows DPAPI |
 | `ServerSettings.pas` | 7 | Сохранение/загрузка настроек, генерация API-ключей |
 | Парсинг JSON | 6 | Обработка всех поддерживаемых форматов входящего JSON |
-| **ИТОГО** | **18** | **100% прохождение** ✅ |
+| `UploadUtils.pas` | 11 | Проверка JPEG-заголовка, SHA-256, генерация UUID, атомарное сохранение |
+| Парсинг Upload Payload | 6 | Base64-кодирование, координаты, метаданные, обработка больших файлов |
+| **ИТОГО** | **35** | **100% прохождение** ✅ |
 
 ### Запуск тестов
 
@@ -293,7 +345,8 @@ TestRunner.exe
 - [ ] Мониторинг производительности: интеграция с Prometheus/Grafana для отслеживания метрик (количество запросов, время отклика, размер пула соединений).
 - [ ] Rate limiting: защита от DDoS-атак через ограничение количества запросов с одного IP (через Nginx или встроенный механизм).
 - [ ] Интеграционные тесты с реальной БД PostgreSQL (через Docker-контейнер).
-- [ ] Загрузка файлов (фотографий) через Multipart/Form-Data.
+- [x] ~~Загрузка файлов (фотографий) через Base64 в JSON~~ ✅ **Реализовано** (endpoint `/upload`)
+- [x] ~~Подключение тестов `TestUploadUtils.pas` и `TestUploadPayloadParser.pas` к `TestRunner.dpr`~~ ✅ **Выполнено**
 
 ---
 

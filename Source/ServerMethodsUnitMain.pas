@@ -1,4 +1,4 @@
-﻿unit ServerMethodsUnitMain;
+unit ServerMethodsUnitMain;
 
 interface
 
@@ -31,6 +31,8 @@ const
   /// <summary>Максимальное количество элементов в массиве</summary>
   MAX_ARRAY_ITEMS = 1000;
 
+  function GetPGConnection: TFDConnection;
+
 implementation
 
 
@@ -56,6 +58,11 @@ begin
   finally
     Obj.Free;
   end;
+end;
+
+function GetPGConnection: TFDConnection;
+begin
+  Result := nil; // Legacy wrapper; callers should create dedicated connections for thread safety
 end;
 
 procedure TServerMethods1.DSServerModuleCreate(Sender: TObject);

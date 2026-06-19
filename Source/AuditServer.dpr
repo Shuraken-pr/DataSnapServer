@@ -13,11 +13,15 @@ uses
   ServerSettings in 'ServerSettings.pas',
   WinDPAPIUtils in 'WinDPAPIUtils.pas',
   ServerLogger in 'ServerLogger.pas',
-  ServerSessionContext in 'ServerSessionContext.pas';
+  ServerSessionContext in 'ServerSessionContext.pas',
+  UploadUtils in 'UploadUtils.pas';
 
 {$R *.res}
 
 begin
+  // Загрузка настроек при старте (для работы без GUI, например как служба)
+  AppSettings.LoadFromFile;
+
   if WebRequestHandler <> nil then
     WebRequestHandler.WebModuleClass := WebModuleClass;
   Application.Initialize;

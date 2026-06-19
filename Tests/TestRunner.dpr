@@ -15,7 +15,9 @@ uses
   DUnitX.TestFramework,
   TestServerMethods in 'TestServerMethods.pas',
   TestServerSettings in 'TestServerSettings.pas',
-  TestWinDPAPIUtils in 'TestWinDPAPIUtils.pas';
+  TestWinDPAPIUtils in 'TestWinDPAPIUtils.pas',
+  TestUploadUtils in 'TestUploadUtils.pas',
+  TestUploadPayloadParser in 'TestUploadPayloadParser.pas';
 
 { keep comment here to protect the following conditional from being removed by the IDE when adding a unit }
 {$IFNDEF TESTINSIGHT}

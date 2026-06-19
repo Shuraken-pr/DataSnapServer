@@ -18,7 +18,8 @@ uses
   FireDAC.Phys.Intf, FireDAC.DApt.Intf, FireDAC.Stan.Async, FireDAC.DApt,
   Data.DB, FireDAC.Comp.DataSet, FireDAC.Comp.Client, FireDAC.UI.Intf,
   FireDAC.Stan.Def, FireDAC.Stan.Pool, FireDAC.Phys, FireDAC.Phys.PG,
-  FireDAC.Phys.PGDef, FireDAC.VCLUI.Wait, ServerSessionContext;
+  FireDAC.Phys.PGDef, FireDAC.VCLUI.Wait, ServerSessionContext,
+  System.JSON, UploadUtils, System.NetEncoding, ServerSettings;
 
 type
   TWebModule1 = class(TWebModule)
@@ -54,6 +55,8 @@ type
       var valid: Boolean);
     procedure WebModuleAfterDispatch(Sender: TObject; Request: TWebRequest;
       Response: TWebResponse; var Handled: Boolean);
+    procedure WebModuleUploadAction(Sender: TObject; Request: TWebRequest;
+      Response: TWebResponse; var Handled: Boolean);
   private
     FServerFunctionInvokerAction: TWebActionItem;
     function AllowServerFunctionInvoker: Boolean;
@@ -68,7 +71,7 @@ implementation
 {$R *.dfm}
 
 uses
-  Web.WebReq, ServerSettings, ServerLogger;
+  Web.WebReq, ServerLogger;
 
 procedure TWebModule1.DSServerClass1GetClass(
   DSServerClass: TDSServerClass; var PersistentClass: TPersistentClass);
@@ -120,6 +123,254 @@ begin
   CurrentUserID := 0;
 end;
 
+function TryDecodeBase64(const S: string; out Bytes: TBytes): Boolean;
+begin
+  try
+    Bytes := TNetEncoding.Base64.DecodeStringToBytes(S);
+    // Проверка: если результат пустой, но вход не пустой - возможно невалидный Base64
+    Result := (Length(Bytes) > 0) or (S = '');
+  except
+    Result := False;
+  end;
+end;
+
+procedure TWebModule1.WebModuleUploadAction(Sender: TObject;
+  Request: TWebRequest; Response: TWebResponse; var Handled: Boolean);
+var
+  JsonStr, FileName, FileUUID, FilePath, DirPath, Sha256: string;
+  PhotoBase64: string;
+  PhotoBytes: TBytes;
+  PhotoStream: TBytesStream;
+  ResponseObj: TJSONObject;
+  Payload: TJSONObject;
+  Lat, Lon: Double;
+  Year, Month, Day: Word;
+  FileSize: Int64;
+  Conn: TFDConnection;
+  Qry: TFDQuery;
+  LogId: Integer;
+  AuthToken: string;
+  DetailsPayload: TJSONObject;
+  DetailsStr: string;
+begin
+  Handled := True;
+
+  try
+    AuthToken := string(Request.GetFieldByName('X-Session-Token'));
+    if AuthToken = '' then
+      AuthToken := string(Request.GetFieldByName('HTTP_X_SESSION_TOKEN'));
+
+    if AuthToken = '' then
+    begin
+      Response.StatusCode := 401;
+      Response.ContentType := 'application/json';
+      Response.Content := '{"result":"error","message":"Unauthorized"}';
+      Exit;
+    end;
+
+    if Request.Method <> 'POST' then
+    begin
+      Response.StatusCode := 405;
+      Response.ContentType := 'application/json';
+      Response.Content := '{"result":"error","message":"Method not allowed"}';
+      Exit;
+    end;
+
+    JsonStr := Request.Content;
+    if JsonStr = '' then
+    begin
+      Response.StatusCode := 400;
+      Response.ContentType := 'application/json';
+      Response.Content := '{"result":"error","message":"Empty body"}';
+      Exit;
+    end;
+
+    Payload := TJSONObject.ParseJSONValue(JsonStr) as TJSONObject;
+    if not Assigned(Payload) then
+    begin
+      Response.StatusCode := 400;
+      Response.ContentType := 'application/json';
+      Response.Content := '{"result":"error","message":"Invalid JSON"}';
+      Exit;
+    end;
+    try
+      Lat := 0; Lon := 0;
+      if Payload.GetValue('lat') <> nil then
+        Lat := (Payload.GetValue('lat') as TJSONNumber).AsDouble;
+      if Payload.GetValue('lon') <> nil then
+        Lon := (Payload.GetValue('lon') as TJSONNumber).AsDouble;
+
+      PhotoBase64 := '';
+      if Payload.GetValue('photo_base64') <> nil then
+        PhotoBase64 := Payload.GetValue('photo_base64').Value;
+
+      if PhotoBase64 = '' then
+      begin
+        Response.StatusCode := 400;
+        Response.ContentType := 'application/json';
+        Response.Content := '{"result":"error","message":"Missing photo_base64"}';
+        Exit;
+      end;
+
+      TryDecodeBase64(PhotoBase64, PhotoBytes);
+//      PhotoBytes := TNetEncoding.Base64.DecodeStringToBytes(PhotoBase64);
+      FileSize := Length(PhotoBytes);
+
+      if FileSize > 10 * 1024 * 1024 then
+      begin
+        Response.StatusCode := 413;
+        Response.ContentType := 'application/json';
+        Response.Content := '{"result":"error","message":"File too large, max 10MB"}';
+        Exit;
+      end;
+
+      PhotoStream := TBytesStream.Create(PhotoBytes);
+      try
+        if not IsValidJpegMagic(PhotoStream) then
+        begin
+          Response.StatusCode := 400;
+          Response.ContentType := 'application/json';
+          Response.Content := '{"result":"error","message":"Invalid format, JPEG expected"}';
+          Exit;
+        end;
+
+        Sha256 := ComputeSHA256(PhotoStream);
+
+        FileUUID := GenerateFileUUID;
+        DirPath := EnsureAuditDir('C:\AuditFiles', Now);
+        if not SaveUploadedFile(PhotoStream, DirPath, FileUUID, FilePath) then
+          raise Exception.Create('Failed to save file');
+
+        if Payload.GetValue('photo_filename') <> nil then
+          FileName := Payload.GetValue('photo_filename').Value
+        else
+          FileName := 'photo.jpg';
+
+        // Проверка конфигурации базы данных
+        if (AppSettings.Host = '') or (AppSettings.Password = '') then
+        begin
+          // Попытка перезагрузить настройки (если сервер запущен как служба)
+          AppSettings.LoadFromFile;
+          if (AppSettings.Host = '') or (AppSettings.Password = '') then
+          begin
+            Response.StatusCode := 500;
+            Response.ContentType := 'application/json';
+            Response.Content := '{"result":"error","message":"Server not configured: database settings incomplete. Run GUI version first to configure DB connection."}';
+            Exit;
+          end;
+        end;
+
+        Conn := TFDConnection.Create(nil);
+        try
+          Conn.Params.DriverID := 'PG';
+          Conn.Params.Values['Server'] := AppSettings.Host;
+          Conn.Params.Values['Port'] := IntToStr(AppSettings.Port);
+          Conn.Params.Database := AppSettings.Database;
+          Conn.Params.UserName := AppSettings.Username;
+          Conn.Params.Password := AppSettings.Password;
+          Conn.LoginPrompt := False;
+          try
+            Conn.Connected := True;
+          except
+            on E: Exception do
+            begin
+              Response.StatusCode := 500;
+              Response.ContentType := 'application/json';
+              Response.Content := '{"result":"error","message":"Database connection failed: ' + E.Message + '"}';
+              Exit;
+            end;
+          end;
+
+          Qry := TFDQuery.Create(nil);
+          try
+            Qry.Connection := Conn;
+            Qry.SQL.Text :=
+              'INSERT INTO audit_logs (user_id, event_type, occurred_at, location, details, created_at) ' +
+              'VALUES (:user_id, :event_type, :occurred_at, point(:lon, :lat), :details, NOW()) ' +
+              'RETURNING id';
+            Qry.ParamByName('user_id').AsInteger := 1;
+            Qry.ParamByName('event_type').AsString := 'mobile_audit';
+            Qry.ParamByName('occurred_at').AsDateTime := Now;
+            Qry.ParamByName('lon').AsFloat := Lon;
+            Qry.ParamByName('lat').AsFloat := Lat;
+
+            // Формируем details JSON без photo_base64 (чтобы не засорять TEXT поле)
+            DetailsPayload := TJSONObject.Create;
+            try
+              if Payload.GetValue('event_type') <> nil then
+                DetailsPayload.AddPair('event_type', Payload.GetValue('event_type').Value);
+              if Payload.GetValue('lat') <> nil then
+                DetailsPayload.AddPair('lat', TJSONNumber.Create((Payload.GetValue('lat') as TJSONNumber).AsDouble));
+              if Payload.GetValue('lon') <> nil then
+                DetailsPayload.AddPair('lon', TJSONNumber.Create((Payload.GetValue('lon') as TJSONNumber).AsDouble));
+              if Payload.GetValue('title') <> nil then
+                DetailsPayload.AddPair('title', Payload.GetValue('title').Value);
+              if Payload.GetValue('device_id') <> nil then
+                DetailsPayload.AddPair('device_id', Payload.GetValue('device_id').Value);
+              if Payload.GetValue('batch_id') <> nil then
+                DetailsPayload.AddPair('batch_id', Payload.GetValue('batch_id').Value);
+              if Payload.GetValue('occurred_at') <> nil then
+                DetailsPayload.AddPair('occurred_at', Payload.GetValue('occurred_at').Value);
+              if Payload.GetValue('photo_filename') <> nil then
+                DetailsPayload.AddPair('photo_filename', Payload.GetValue('photo_filename').Value);
+              DetailsStr := DetailsPayload.ToString;
+            finally
+              DetailsPayload.Free;
+            end;
+            Qry.ParamByName('details').Size := 0;
+            Qry.ParamByName('details').AsString := DetailsStr;
+            Qry.Open;
+            LogId := Qry.FieldByName('id').AsInteger;
+
+            Qry.SQL.Text :=
+              'INSERT INTO audit_files (log_id, file_uuid, storage_path, original_filename, file_size, checksum_sha256, mime_type) ' +
+              'VALUES (:log_id, :uuid::uuid, :path, :orig, :size, :sha, :mime)';
+            Qry.ParamByName('log_id').AsInteger := LogId;
+            Qry.ParamByName('uuid').AsString := FileUUID;
+            Qry.ParamByName('path').AsString := FilePath;
+            Qry.ParamByName('orig').AsString := FileName;
+            Qry.ParamByName('size').AsLargeInt := FileSize;
+            Qry.ParamByName('sha').AsString := Sha256;
+            Qry.ParamByName('mime').AsString := 'image/jpeg';
+            Qry.ExecSQL;
+          finally
+            Qry.Free;
+          end;
+        finally
+          Conn.Free;
+        end;
+
+        ResponseObj := TJSONObject.Create;
+        try
+          ResponseObj.AddPair('result', 'ok');
+          ResponseObj.AddPair('file_id', FileUUID);
+          ResponseObj.AddPair('checksum', Sha256);
+          DecodeDate(Now, Year, Month, Day);
+          ResponseObj.AddPair('url', Format('https://%s/audit-files/%d/%d/%d/%s.jpg',
+            [Request.Host, Year, Month, Day, FileUUID]));
+          Response.StatusCode := 200;
+          Response.ContentType := 'application/json';
+          Response.Content := ResponseObj.ToString;
+        finally
+          ResponseObj.Free;
+        end;
+      finally
+        PhotoStream.Free;
+      end;
+    finally
+      Payload.Free;
+    end;
+
+  except
+    on E: Exception do
+    begin
+      Response.StatusCode := 500;
+      Response.ContentType := 'application/json';
+      Response.Content := '{"result":"error","message":"' + E.Message + '"}';
+    end;
+  end;
+end;
+
 procedure TWebModule1.WebModuleBeforeDispatch(Sender: TObject;
   Request: TWebRequest; Response: TWebResponse; var Handled: Boolean);
 var
@@ -139,6 +390,13 @@ begin
     Response.ContentType := 'application/json';
     Response.StatusCode := 200;
     Handled := True;
+    Exit;
+  end;
+
+  // === upload endpoint (outside /datasnap/ REST) ===
+  if PathInfo = '/upload' then
+  begin
+    WebModuleUploadAction(Sender, Request, Response, Handled);
     Exit;
   end;
 
