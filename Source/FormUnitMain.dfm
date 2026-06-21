@@ -92,4 +92,10 @@ object frmServer: TfrmServer
     Left = 136
     Top = 160
   end
+  object tmrCheckSessions: TTimer
+    Interval = 1800
+    OnTimer = tmrCheckSessionsTimer
+    Left = 284
+    Top = 164
+  end
 end

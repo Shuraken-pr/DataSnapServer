@@ -16,7 +16,8 @@ uses
   FireDAC.Phys.Intf, FireDAC.Stan.Def, FireDAC.Phys, FireDAC.Comp.Client,
   ServerSettings, frServerSettings, FireDAC.Stan.Pool, FireDAC.Stan.Async,
   FireDAC.Phys.PG, FireDAC.Phys.PGDef, FireDAC.VCLUI.Wait, FireDAC.Stan.Param,
-  FireDAC.DatS, FireDAC.DApt.Intf, FireDAC.DApt, Data.DB, FireDAC.Comp.DataSet;
+  FireDAC.DatS, FireDAC.DApt.Intf, FireDAC.DApt, Data.DB, FireDAC.Comp.DataSet,
+  Vcl.ExtCtrls;
 
 type
   TfrmServer = class(TForm)
@@ -29,17 +30,20 @@ type
     FDManager1: TFDManager;
     StartConn: TFDConnection;
     qryClearSession: TFDQuery;
+    tmrCheckSessions: TTimer;
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);     // НОВОЕ
     procedure ApplicationEvents1Idle(Sender: TObject; var Done: Boolean);
     procedure ButtonStartClick(Sender: TObject);
     procedure ButtonStopClick(Sender: TObject);
     procedure ButtonOpenBrowserClick(Sender: TObject);
+    procedure tmrCheckSessionsTimer(Sender: TObject);
   private
     FServer: TIdHTTPWebBrokerBridge;
     procedure StartServer;
     procedure CheckAndLoadSettings;
     procedure ApplySettingsToManager(const Settings: TServerSettings);
+    procedure CheckCleanupTaskStatus;
   public
   end;
 
@@ -56,6 +60,8 @@ uses
 {$ENDIF}
   Datasnap.DSSession,
   System.Generics.Collections,
+  System.IOUtils,
+  System.DateUtils,
   ServerLogger;  // логирование
 
 procedure TfrmServer.ApplicationEvents1Idle(Sender: TObject; var Done: Boolean);
@@ -102,6 +108,65 @@ begin
     [Settings.Username, Settings.Host, Settings.Port, Settings.Database]));
   finally
     Settings.Free;
+  end;
+end;
+
+procedure TfrmServer.CheckCleanupTaskStatus;
+var
+  LogDir: string;
+  LogFiles: TArray<string>;
+  LastLogFile: string;
+  LastRunTime: TDateTime;
+  CurrentFile: string;
+  FileTime: TDateTime;
+begin
+  LogDir := 'C:\AuditServer\logs';
+
+  if not TDirectory.Exists(LogDir) then
+  begin
+    Log.Warn('Папка логов очистки не найдена: ' + LogDir);
+    Exit;
+  end;
+
+  // 🔑 ИСПРАВЛЕНИЕ: Используем TDirectory.GetFiles и TFile.GetLastWriteTime
+  LogFiles := TDirectory.GetFiles(LogDir, 'cleanup_*.log');
+
+  if Length(LogFiles) = 0 then
+  begin
+    Log.Warn('Логи очистки сессий не найдены');
+    Exit;
+  end;
+
+  // 🔑 ИСПРАВЛЕНИЕ: Находим самый свежий лог-файл
+  LastLogFile := '';
+  LastRunTime := 0;
+
+  for CurrentFile in LogFiles do
+  begin
+    FileTime := TFile.GetLastWriteTime(CurrentFile);
+    if FileTime > LastRunTime then
+    begin
+      LastRunTime := FileTime;
+      LastLogFile := CurrentFile;
+    end;
+  end;
+
+  if LastLogFile = '' then
+  begin
+    Log.Warn('Не удалось определить последний лог-файл');
+    Exit;
+  end;
+
+  // 🔑 ИСПРАВЛЕНИЕ: Используем EncodeTime правильно (часы, минуты, секунды, миллисекунды)
+  if Now - LastRunTime > EncodeTime(2, 0, 0, 0) then
+  begin
+    Log.Warn(Format('Очистка сессий не запускалась более 2 часов. Последний запуск: %s (файл: %s)',
+      [DateTimeToStr(LastRunTime), ExtractFileName(LastLogFile)]));
+  end
+  else
+  begin
+    Log.Info(Format('Очистка сессий работает нормально. Последний запуск: %s',
+      [DateTimeToStr(LastRunTime)]));
   end;
 end;
 
@@ -222,6 +287,11 @@ begin
   FServer.DefaultPort := CurPort;
   FServer.Active := True;
   Log.Info(Format('StartServer: Server started in HTTP mode on port %d (behind Nginx)', [CurPort]));
+end;
+
+procedure TfrmServer.tmrCheckSessionsTimer(Sender: TObject);
+begin
+  CheckCleanupTaskStatus;
 end;
 
 end.
