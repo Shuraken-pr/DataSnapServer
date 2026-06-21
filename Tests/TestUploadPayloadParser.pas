@@ -81,33 +81,21 @@ begin
     Payload.Free;
   end;
 end;
-{
-procedure TTestUploadPayloadParser.TestInvalidBase64;
-var
-  Bytes: TBytes;
-  Raised: Boolean;
-begin
-  Raised := False;
-  try
-    Bytes := TNetEncoding.Base64.DecodeStringToBytes('!!!invalid!!!');
-  except
-    Raised := True;
-  end;
-  Assert.IsTrue(Raised, 'Expected exception on invalid Base64');
-end;
-}
 
 procedure TTestUploadPayloadParser.TestInvalidBase64;
 var
   Bytes: TBytes;
   check: string;
+  Valid: Boolean;
 begin
-  // Delphi TNetEncoding.Base64 не выбрасывает исключение на невалидный input,
-  // возвращает пустой массив или делает best-effort decode
+  // Delphi TNetEncoding.Base64 does not throw on invalid input,
+  // it returns empty or best-effort decoded array.
+  // Our IsValidBase64Chars rejects invalid input before decoding.
   Bytes := TNetEncoding.Base64.DecodeStringToBytes('!!!invalid!!!');
-  // ѕровер€ем что результат некорректен (либо пустой, либо не соответствует оригиналу)
   check := TNetEncoding.Base64.EncodeBytesToString(Bytes);
-  Assert.IsTrue((Length(Bytes) = 0) or (check <> '!!!invalid!!!'), 'Invalid Base64 should result in empty or near-empty output');
+  // The original string should not round-trip if input was invalid
+  Valid := (Length(Bytes) = 0) or (check <> '!!!invalid!!!');
+  Assert.IsTrue(Valid, 'Invalid Base64 should not round-trip correctly');
 end;
 
 procedure TTestUploadPayloadParser.TestLargePhotoBase64;

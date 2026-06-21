@@ -48,6 +48,27 @@ type
 
     [Test]
     procedure TestSaveUploadedFile_Content;
+
+    [Test]
+    procedure TestIsValidBase64Chars_Valid;
+
+    [Test]
+    procedure TestIsValidBase64Chars_InvalidChars;
+
+    [Test]
+    procedure TestIsValidBase64Chars_WrongLength;
+
+    [Test]
+    procedure TestIsValidBase64Chars_Empty;
+
+    [Test]
+    procedure TestTryDecodeBase64_Valid;
+
+    [Test]
+    procedure TestTryDecodeBase64_Invalid;
+
+    [Test]
+    procedure TestTryDecodeBase64_Empty;
   end;
 
 implementation
@@ -234,6 +255,55 @@ begin
   finally
     Stream.Free;
   end;
+end;
+
+
+procedure TTestUploadUtils.TestIsValidBase64Chars_Valid;
+begin
+  Assert.IsTrue(IsValidBase64Chars('dGVzdA=='));
+  Assert.IsTrue(IsValidBase64Chars('YWJjZGVmZw=='));
+end;
+
+procedure TTestUploadUtils.TestIsValidBase64Chars_InvalidChars;
+begin
+  Assert.IsFalse(IsValidBase64Chars('!!!invalid!!!'));
+  Assert.IsFalse(IsValidBase64Chars('dGVzdA==!!'));
+  Assert.IsFalse(IsValidBase64Chars('dGVzdA==='));
+end;
+
+procedure TTestUploadUtils.TestIsValidBase64Chars_WrongLength;
+begin
+  Assert.IsFalse(IsValidBase64Chars('dGVzdA='));
+  Assert.IsFalse(IsValidBase64Chars('dGVzdA'));
+end;
+
+procedure TTestUploadUtils.TestIsValidBase64Chars_Empty;
+begin
+  Assert.IsTrue(IsValidBase64Chars(''));
+end;
+
+procedure TTestUploadUtils.TestTryDecodeBase64_Valid;
+var
+  Bytes: TBytes;
+begin
+  Assert.IsTrue(TryDecodeBase64('dGVzdA==', Bytes));
+  Assert.AreEqual(4, Length(Bytes));
+end;
+
+procedure TTestUploadUtils.TestTryDecodeBase64_Invalid;
+var
+  Bytes: TBytes;
+begin
+  Assert.IsFalse(TryDecodeBase64('!!!invalid!!!', Bytes));
+  Assert.AreEqual(0, Length(Bytes));
+end;
+
+procedure TTestUploadUtils.TestTryDecodeBase64_Empty;
+var
+  Bytes: TBytes;
+begin
+  Assert.IsTrue(TryDecodeBase64('', Bytes));
+  Assert.AreEqual(0, Length(Bytes));
 end;
 
 initialization

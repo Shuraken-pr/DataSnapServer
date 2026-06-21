@@ -6,14 +6,16 @@
 
 ## 📊 Статистика покрытия
 
+### ✅ Выполняемые тесты (42 теста)
+
 | Тестовый набор | Тестов | Назначение |
 |----------------|:------:|------------|
 | `TTestWinDPAPIUtils` | 5 | Шифрование/дешифрование через Windows DPAPI |
 | `TTestServerSettings` | 7 | Сохранение/загрузка настроек, генерация API-ключей |
 | `TTestJsonParsing` | 6 | Парсинг входящего JSON во всех поддерживаемых форматах |
-| `TTestUploadUtils` | 11 | Проверка JPEG-заголовка, SHA-256, генерация UUID, атомарное сохранение |
+| `TTestUploadUtils` | 18 | Проверка JPEG-заголовка, SHA-256, генерация UUID, атомарное сохранение, валидация Base64 |
 | `TTestUploadPayloadParser` | 6 | Парсинг payload для endpoint `/upload`: Base64, координаты, метаданные |
-| **ИТОГО** | **35** | **100% успешное прохождение** ✅ |
+| **ИТОГО** | **42** | **100% успешное прохождение** ✅ |
 
 ## 🧪 Список тестов
 
@@ -53,7 +55,7 @@
 | `TestParseEmptyArray` | Пустой массив `[]` обрабатывается корректно |
 | `TestParseJsonWithMissingFields` | Отсутствие опциональных полей не вызывает ошибок |
 
-### TTestUploadUtils (11 тестов)
+### TTestUploadUtils (18 тестов)
 Проверяет модуль `UploadUtils.pas`, отвечающий за обработку загруженных фотографий.
 
 | Имя теста | Что проверяет |
@@ -69,6 +71,13 @@
 | `TestEnsureAuditDir_YearMonthDay` | Путь содержит правильные год, месяц, день |
 | `TestSaveUploadedFile_Atomic` | Файл сохраняется атомарно (через .tmp → rename), .tmp не остаётся |
 | `TestSaveUploadedFile_Content` | Содержимое сохранённого файла совпадает с исходным |
+| `TestIsValidBase64Chars_Valid` | Корректная валидация валидных Base64-символов |
+| `TestIsValidBase64Chars_InvalidChars` | Отклонение Base64 с некорректными символами |
+| `TestIsValidBase64Chars_WrongLength` | Отклонение Base64 неправильной длины |
+| `TestIsValidBase64Chars_Empty` | Обработка пустой строки |
+| `TestTryDecodeBase64_Valid` | Успешное декодирование валидного Base64 |
+| `TestTryDecodeBase64_Invalid` | Возврат `False` для невалидного Base64 |
+| `TestTryDecodeBase64_Empty` | Обработка пустой строки |
 
 ### TTestUploadPayloadParser (6 тестов)
 Проверяет парсинг JSON-payload для endpoint `/upload`.
@@ -84,22 +93,23 @@
 
 ## 📈 Результаты тестирования
 
-Последний прогон (2026-06-19):
+Последний прогон (2026-06-21):
 
 ```
-Total tests: 35
-Passed:      35 ✅
+Total tests: 42
+Passed:      42 ✅
 Failed:      0
 Ignored:     0
-Time:        ~0.05s
+Time:        3.200s
 ```
 
 ### История исправлений
 
-| Дата | Тест | Описание изменения |
-|------|------|--------------------|
-| 2026-06-19 | Все тесты | Подключены `TestUploadUtils.pas` и `TestUploadPayloadParser.pas` к `TestRunner.dpr` |
-| 2026-06-18 | `TestDecryptInvalidData` | Изменено ожидание: функция возвращает пустую строку вместо выброса исключения (более безопасное поведение) |
+| Дата | Описание |
+|------|----------|
+| 2026-06-21 | Подключены и успешно запущены `TestUploadUtils.pas` (18 тестов) и `TestUploadPayloadParser.pas` (6 тестов). Итого 42 теста, 100% прохождение |
+| 2026-06-19 | Подключены `TestUploadUtils.pas` и `TestUploadPayloadParser.pas` к `TestRunner.dpr` |
+| 2026-06-18 | `TestDecryptInvalidData` — изменено ожидание: функция возвращает пустую строку вместо выброса исключения (более безопасное поведение) |
 
 ## 🚀 Как запустить тесты
 

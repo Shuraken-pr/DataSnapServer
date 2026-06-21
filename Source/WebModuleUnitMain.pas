@@ -1,4 +1,4 @@
-﻿unit WebModuleUnitMain;
+unit WebModuleUnitMain;
 
 // ИСПРАВЛЕНО по итогам код-ревью:
 //   [CRITICAL] Добавлена базовая аутентификация через TDSAuthenticationManager
@@ -123,17 +123,6 @@ begin
   CurrentUserID := 0;
 end;
 
-function TryDecodeBase64(const S: string; out Bytes: TBytes): Boolean;
-begin
-  try
-    Bytes := TNetEncoding.Base64.DecodeStringToBytes(S);
-    // Проверка: если результат пустой, но вход не пустой - возможно невалидный Base64
-    Result := (Length(Bytes) > 0) or (S = '');
-  except
-    Result := False;
-  end;
-end;
-
 procedure TWebModule1.WebModuleUploadAction(Sender: TObject;
   Request: TWebRequest; Response: TWebResponse; var Handled: Boolean);
 var
@@ -152,6 +141,8 @@ var
   AuthToken: string;
   DetailsPayload: TJSONObject;
   DetailsStr: string;
+  QryUser: TFDQuery;
+  UserID: Integer;
 begin
   Handled := True;
 
@@ -166,6 +157,36 @@ begin
       Response.ContentType := 'application/json';
       Response.Content := '{"result":"error","message":"Unauthorized"}';
       Exit;
+    end;
+
+    begin
+      if not WebConn.Connected then
+        WebConn.Open;
+      QryUser := TFDQuery.Create(nil);
+      try
+        QryUser.Connection := WebConn;
+        QryUser.SQL.Text :=
+          'SELECT user_id FROM user_sessions ' +
+          'WHERE session_token = :token AND expires_at > CURRENT_TIMESTAMP ' +
+          'LIMIT 1';
+        QryUser.ParamByName('token').AsString := AuthToken;
+        QryUser.Open;
+        if not QryUser.IsEmpty then
+          UserID := QryUser.FieldByName('user_id').AsInteger
+        else
+          UserID := 0;
+        QryUser.Close;
+      finally
+        QryUser.Free;
+      end;
+
+      if UserID <= 0 then
+      begin
+        Response.StatusCode := 401;
+        Response.ContentType := 'application/json';
+        Response.Content := '{"result":"error","message":"Unauthorized: invalid or expired token"}';
+        Exit;
+      end;
     end;
 
     if Request.Method <> 'POST' then
@@ -212,8 +233,13 @@ begin
         Exit;
       end;
 
-      TryDecodeBase64(PhotoBase64, PhotoBytes);
-//      PhotoBytes := TNetEncoding.Base64.DecodeStringToBytes(PhotoBase64);
+      if not TryDecodeBase64(PhotoBase64, PhotoBytes) then
+      begin
+        Response.StatusCode := 400;
+        Response.ContentType := 'application/json';
+        Response.Content := '{"result":"error","message":"Invalid photo_base64: not valid Base64"}';
+        Exit;
+      end;
       FileSize := Length(PhotoBytes);
 
       if FileSize > 10 * 1024 * 1024 then
@@ -288,7 +314,7 @@ begin
               'INSERT INTO audit_logs (user_id, event_type, occurred_at, location, details, created_at) ' +
               'VALUES (:user_id, :event_type, :occurred_at, point(:lon, :lat), :details, NOW()) ' +
               'RETURNING id';
-            Qry.ParamByName('user_id').AsInteger := 1;
+            Qry.ParamByName('user_id').AsInteger := UserID;
             Qry.ParamByName('event_type').AsString := 'mobile_audit';
             Qry.ParamByName('occurred_at').AsDateTime := Now;
             Qry.ParamByName('lon').AsFloat := Lon;
