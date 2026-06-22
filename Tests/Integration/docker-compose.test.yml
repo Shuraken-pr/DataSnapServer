@@ -1,0 +1,80 @@
+# =============================================================================
+# Docker Compose для тестовой БД PostgreSQL
+# =============================================================================
+# Использование:
+#   Запуск:    docker-compose -f docker-compose.test.yml up -d
+#   Остановка: docker-compose -f docker-compose.test.yml down
+#   Логи:      docker-compose -f docker-compose.test.yml logs -f
+#   Удаление с данными: docker-compose -f docker-compose.test.yml down -v
+# =============================================================================
+
+version: '3.8'
+
+services:
+  postgres-test:
+    image: postgres:14-alpine
+    container_name: audit-test-db
+    restart: unless-stopped
+    
+    environment:
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_DB: audit_test
+      TZ: Europe/Moscow
+      PGTZ: Europe/Moscow
+    
+    ports:
+      # Отдельный порт 5433, чтобы не конфликтовать с продакшеном (5432)
+      - "5433:5432"
+    
+    volumes:
+      # Скрипт инициализации БД (выполняется при первом запуске)
+      - ./init-test-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      
+      # Постоянное хранилище данных (сохраняется между перезапусками)
+      - test-db-data:/var/lib/postgresql/data
+    
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d audit_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    
+    # Ограничения ресурсов (чтобы тесты не съедали всю память)
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    
+    # Параметры PostgreSQL для тестов
+    command: >
+      postgres
+        -c max_connections=50
+        -c shared_buffers=64MB
+        -c effective_cache_size=128MB
+        -c maintenance_work_mem=32MB
+        -c checkpoint_completion_target=0.9
+        -c wal_buffers=2MB
+        -c default_statistics_target=100
+        -c random_page_cost=1.1
+        -c effective_io_concurrency=200
+        -c work_mem=2MB
+        -c min_wal_size=32MB
+        -c max_wal_size=64MB
+        -c log_timezone='Europe/Moscow'
+        -c timezone='Europe/Moscow'
+
+volumes:
+  test-db-data:
+    name: audit-test-db-data
+    driver: local
+
+# =============================================================================
+# Сеть по умолчанию: bridge
+# Контейнер доступен по адресу: localhost:5433
+# =============================================================================

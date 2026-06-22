@@ -1,4 +1,4 @@
-unit WebModuleUnitMain;
+﻿unit WebModuleUnitMain;
 
 // ИСПРАВЛЕНО по итогам код-ревью:
 //   [CRITICAL] Добавлена базовая аутентификация через TDSAuthenticationManager
@@ -159,12 +159,12 @@ begin
       Exit;
     end;
 
-    begin
-      if not WebConn.Connected then
-        WebConn.Open;
+    Conn := TFDConnection.Create(nil);
+    if Assigned(Conn) and (AppSettings.ApplyToConn(conn)) then
+    try
       QryUser := TFDQuery.Create(nil);
       try
-        QryUser.Connection := WebConn;
+        QryUser.Connection := Conn;
         QryUser.SQL.Text :=
           'SELECT user_id FROM user_sessions ' +
           'WHERE session_token = :token AND expires_at > CURRENT_TIMESTAMP ' +
@@ -187,125 +187,104 @@ begin
         Response.Content := '{"result":"error","message":"Unauthorized: invalid or expired token"}';
         Exit;
       end;
-    end;
 
-    if Request.Method <> 'POST' then
-    begin
-      Response.StatusCode := 405;
-      Response.ContentType := 'application/json';
-      Response.Content := '{"result":"error","message":"Method not allowed"}';
-      Exit;
-    end;
+      if Request.Method <> 'POST' then
+      begin
+        Response.StatusCode := 405;
+        Response.ContentType := 'application/json';
+        Response.Content := '{"result":"error","message":"Method not allowed"}';
+        Exit;
+      end;
 
-    JsonStr := Request.Content;
-    if JsonStr = '' then
-    begin
-      Response.StatusCode := 400;
-      Response.ContentType := 'application/json';
-      Response.Content := '{"result":"error","message":"Empty body"}';
-      Exit;
-    end;
-
-    Payload := TJSONObject.ParseJSONValue(JsonStr) as TJSONObject;
-    if not Assigned(Payload) then
-    begin
-      Response.StatusCode := 400;
-      Response.ContentType := 'application/json';
-      Response.Content := '{"result":"error","message":"Invalid JSON"}';
-      Exit;
-    end;
-    try
-      Lat := 0; Lon := 0;
-      if Payload.GetValue('lat') <> nil then
-        Lat := (Payload.GetValue('lat') as TJSONNumber).AsDouble;
-      if Payload.GetValue('lon') <> nil then
-        Lon := (Payload.GetValue('lon') as TJSONNumber).AsDouble;
-
-      PhotoBase64 := '';
-      if Payload.GetValue('photo_base64') <> nil then
-        PhotoBase64 := Payload.GetValue('photo_base64').Value;
-
-      if PhotoBase64 = '' then
+      JsonStr := Request.Content;
+      if JsonStr = '' then
       begin
         Response.StatusCode := 400;
         Response.ContentType := 'application/json';
-        Response.Content := '{"result":"error","message":"Missing photo_base64"}';
+        Response.Content := '{"result":"error","message":"Empty body"}';
         Exit;
       end;
 
-      if not TryDecodeBase64(PhotoBase64, PhotoBytes) then
+      Payload := TJSONObject.ParseJSONValue(JsonStr) as TJSONObject;
+      if not Assigned(Payload) then
       begin
         Response.StatusCode := 400;
         Response.ContentType := 'application/json';
-        Response.Content := '{"result":"error","message":"Invalid photo_base64: not valid Base64"}';
+        Response.Content := '{"result":"error","message":"Invalid JSON"}';
         Exit;
       end;
-      FileSize := Length(PhotoBytes);
-
-      if FileSize > 10 * 1024 * 1024 then
-      begin
-        Response.StatusCode := 413;
-        Response.ContentType := 'application/json';
-        Response.Content := '{"result":"error","message":"File too large, max 10MB"}';
-        Exit;
-      end;
-
-      PhotoStream := TBytesStream.Create(PhotoBytes);
       try
-        if not IsValidJpegMagic(PhotoStream) then
+        Lat := 0; Lon := 0;
+        if Payload.GetValue('lat') <> nil then
+          Lat := (Payload.GetValue('lat') as TJSONNumber).AsDouble;
+        if Payload.GetValue('lon') <> nil then
+          Lon := (Payload.GetValue('lon') as TJSONNumber).AsDouble;
+
+        PhotoBase64 := '';
+        if Payload.GetValue('photo_base64') <> nil then
+          PhotoBase64 := Payload.GetValue('photo_base64').Value;
+
+        if PhotoBase64 = '' then
         begin
           Response.StatusCode := 400;
           Response.ContentType := 'application/json';
-          Response.Content := '{"result":"error","message":"Invalid format, JPEG expected"}';
+          Response.Content := '{"result":"error","message":"Missing photo_base64"}';
           Exit;
         end;
 
-        Sha256 := ComputeSHA256(PhotoStream);
-
-        FileUUID := GenerateFileUUID;
-        DirPath := EnsureAuditDir('C:\AuditFiles', Now);
-        if not SaveUploadedFile(PhotoStream, DirPath, FileUUID, FilePath) then
-          raise Exception.Create('Failed to save file');
-
-        if Payload.GetValue('photo_filename') <> nil then
-          FileName := Payload.GetValue('photo_filename').Value
-        else
-          FileName := 'photo.jpg';
-
-        // Проверка конфигурации базы данных
-        if (AppSettings.Host = '') or (AppSettings.Password = '') then
+        if not TryDecodeBase64(PhotoBase64, PhotoBytes) then
         begin
-          // Попытка перезагрузить настройки (если сервер запущен как служба)
-          AppSettings.LoadFromFile;
-          if (AppSettings.Host = '') or (AppSettings.Password = '') then
-          begin
-            Response.StatusCode := 500;
-            Response.ContentType := 'application/json';
-            Response.Content := '{"result":"error","message":"Server not configured: database settings incomplete. Run GUI version first to configure DB connection."}';
-            Exit;
-          end;
+          Response.StatusCode := 400;
+          Response.ContentType := 'application/json';
+          Response.Content := '{"result":"error","message":"Invalid photo_base64: not valid Base64"}';
+          Exit;
+        end;
+        FileSize := Length(PhotoBytes);
+
+        if FileSize > 10 * 1024 * 1024 then
+        begin
+          Response.StatusCode := 413;
+          Response.ContentType := 'application/json';
+          Response.Content := '{"result":"error","message":"File too large, max 10MB"}';
+          Exit;
         end;
 
-        Conn := TFDConnection.Create(nil);
+        PhotoStream := TBytesStream.Create(PhotoBytes);
         try
-          Conn.Params.DriverID := 'PG';
-          Conn.Params.Values['Server'] := AppSettings.Host;
-          Conn.Params.Values['Port'] := IntToStr(AppSettings.Port);
-          Conn.Params.Database := AppSettings.Database;
-          Conn.Params.UserName := AppSettings.Username;
-          Conn.Params.Password := AppSettings.Password;
-          Conn.LoginPrompt := False;
-          try
-            Conn.Connected := True;
-          except
-            on E: Exception do
+          if not IsValidJpegMagic(PhotoStream) then
+          begin
+            Response.StatusCode := 400;
+            Response.ContentType := 'application/json';
+            Response.Content := '{"result":"error","message":"Invalid format, JPEG expected"}';
+            Exit;
+          end;
+
+          Sha256 := ComputeSHA256(PhotoStream);
+
+          FileUUID := GenerateFileUUID;
+          DirPath := EnsureAuditDir('C:\AuditFiles', Now);
+          if not SaveUploadedFile(PhotoStream, DirPath, FileUUID, FilePath) then
+            raise Exception.Create('Failed to save file');
+
+          if Payload.GetValue('photo_filename') <> nil then
+            FileName := Payload.GetValue('photo_filename').Value
+          else
+            FileName := 'photo.jpg';
+
+          // Проверка конфигурации базы данных
+          if (AppSettings.Host = '') or (AppSettings.Password = '') then
+          begin
+            // Попытка перезагрузить настройки (если сервер запущен как служба)
+            AppSettings.LoadFromFile;
+            if (AppSettings.Host = '') or (AppSettings.Password = '') then
             begin
               Response.StatusCode := 500;
               Response.ContentType := 'application/json';
-              Response.Content := '{"result":"error","message":"Database connection failed: ' + E.Message + '"}';
+              Response.Content := '{"result":"error","message":"Server not configured: database settings incomplete. Run GUI version first to configure DB connection."}';
               Exit;
             end;
           end;
+
 
           Qry := TFDQuery.Create(nil);
           try
@@ -362,29 +341,29 @@ begin
           finally
             Qry.Free;
           end;
-        finally
-          Conn.Free;
-        end;
 
-        ResponseObj := TJSONObject.Create;
-        try
-          ResponseObj.AddPair('result', 'ok');
-          ResponseObj.AddPair('file_id', FileUUID);
-          ResponseObj.AddPair('checksum', Sha256);
-          DecodeDate(Now, Year, Month, Day);
-          ResponseObj.AddPair('url', Format('https://%s/audit-files/%d/%d/%d/%s.jpg',
-            [Request.Host, Year, Month, Day, FileUUID]));
-          Response.StatusCode := 200;
-          Response.ContentType := 'application/json';
-          Response.Content := ResponseObj.ToString;
+          ResponseObj := TJSONObject.Create;
+          try
+            ResponseObj.AddPair('result', 'ok');
+            ResponseObj.AddPair('file_id', FileUUID);
+            ResponseObj.AddPair('checksum', Sha256);
+            DecodeDate(Now, Year, Month, Day);
+            ResponseObj.AddPair('url', Format('https://%s/audit-files/%d/%d/%d/%s.jpg',
+              [Request.Host, Year, Month, Day, FileUUID]));
+            Response.StatusCode := 200;
+            Response.ContentType := 'application/json';
+            Response.Content := ResponseObj.ToString;
+          finally
+            ResponseObj.Free;
+          end;
         finally
-          ResponseObj.Free;
+          PhotoStream.Free;
         end;
       finally
-        PhotoStream.Free;
+        Payload.Free;
       end;
     finally
-      Payload.Free;
+      Conn.Free;
     end;
 
   except
@@ -404,6 +383,7 @@ var
   PathInfo: string;
   UserID: Integer;
   QryUser: TFDQuery;
+  Conn: TFDConnection;
 begin
   CurrentUserID := 0; // <--- ДОБАВИТЬ ЭТУ СТРОКУ (Сброс в начале каждого запроса)
   PathInfo := string(Request.InternalPathInfo);
@@ -447,24 +427,29 @@ begin
       end;
 
       // Проверяем токен и сразу получаем user_id — один запрос вместо двух
-      if not WebConn.Connected then WebConn.Open;
-
-      QryUser := TFDQuery.Create(nil);
+      UserID := 0;
+      Conn := TFDConnection.Create(nil);
+      if Assigned(Conn) and (AppSettings.ApplyToConn(conn)) then
       try
-        QryUser.Connection := WebConn;
-        QryUser.SQL.Text :=
-          'SELECT user_id FROM user_sessions ' +
-          'WHERE session_token = :token AND expires_at > CURRENT_TIMESTAMP ' +
-          'LIMIT 1';
-        QryUser.ParamByName('token').AsString := SessionToken;
-        QryUser.Open;
-        if not QryUser.IsEmpty then
-          UserID := QryUser.FieldByName('user_id').AsInteger
-        else
-          UserID := 0;
-        QryUser.Close;
+        QryUser := TFDQuery.Create(nil);
+        try
+          QryUser.Connection := Conn;
+          QryUser.SQL.Text :=
+            'SELECT user_id FROM user_sessions ' +
+            'WHERE session_token = :token AND expires_at > CURRENT_TIMESTAMP ' +
+            'LIMIT 1';
+          QryUser.ParamByName('token').AsString := SessionToken;
+          QryUser.Open;
+          if not QryUser.IsEmpty then
+            UserID := QryUser.FieldByName('user_id').AsInteger
+          else
+            UserID := 0;
+          QryUser.Close;
+        finally
+          QryUser.Free;
+        end;
       finally
-        QryUser.Free;
+        FreeAndNil(Conn);
       end;
 
       if UserID > 0 then

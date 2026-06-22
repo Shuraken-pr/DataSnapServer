@@ -1,4 +1,4 @@
-unit ServerMethodsUnitMain;
+﻿unit ServerMethodsUnitMain;
 
 interface
 
@@ -244,7 +244,8 @@ begin
 
     // 6. Работа с БД
     try
-      PGConn.Open;
+      AppSettings.ApplyToConn(PGConn);
+//      PGConn.Open;
       PGConn.StartTransaction;
       try
         for I := 0 to Arr.Count - 1 do

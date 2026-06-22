@@ -1,4 +1,4 @@
-program AuditServer;
+﻿program AuditServer;
 {$APPTYPE GUI}
 
 {$R *.dres}

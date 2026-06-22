@@ -4,7 +4,7 @@ interface
 
 uses
   System.SysUtils, System.Classes, Xml.XMLDoc, Xml.XMLIntf,
-  System.IOUtils;
+  FireDAC.Comp.Client, FireDAC.Phys.PG, System.IOUtils;
 
 type
   TServerSettings = class
@@ -34,6 +34,7 @@ type
     property Password: string read FPassword write FPassword;
     /// <summary>Генерирует криптографически стойкий 32-символьный API-ключ</summary>
     class function GenerateSecureApiKey: string;
+    function ApplyToConn(var AConn: TFDConnection): boolean;
   end;
 
 var
@@ -46,12 +47,29 @@ const
 implementation
 
 // Важно: добавляем FireDAC для создания тестового соединения
-uses FireDAC.Comp.Client, FireDAC.Phys.PG, Variants,
+uses Variants,
   WinDPAPIUtils, ServerLogger, Winapi.Windows;
 
 { TServerSettings }
 var
   _PGDriverLink: TFDPhysPGDriverLink = nil;
+
+function TServerSettings.ApplyToConn(var AConn: TFDConnection): boolean;
+begin
+  Result := true;
+  try
+    AConn.Params.DriverID := 'PG';
+    AConn.Params.Values['Server'] := Host;
+    AConn.Params.Values['Port'] := IntToStr(Port);
+    AConn.Params.Database := Database;
+    AConn.Params.UserName := Username;
+    AConn.Params.Password := Password;
+    AConn.LoginPrompt := False;
+    AConn.Connected := true;
+  except
+    Result := false;
+  end;
+end;
 
 constructor TServerSettings.Create;
 begin
@@ -94,8 +112,17 @@ begin
 end;
 
 function TServerSettings.GetFilePath: string;
+var
+  SettingsFileName: string;
 begin
-  Result := TPath.Combine(TPath.GetDirectoryName(ParamStr(0)), 'db_settings.xml');
+  // 🔑 ИСПРАВЛЕНИЕ: Поддержка параметра /test для интеграционных тестов
+  // Если сервер запущен с параметром /test, используем тестовый файл настроек
+  if FindCmdLineSwitch('test', ['-', '/'], True) then
+    SettingsFileName := 'db_settings_test.xml'
+  else
+    SettingsFileName := 'db_settings.xml';
+    
+  Result := TPath.Combine(TPath.GetDirectoryName(ParamStr(0)), SettingsFileName);
 end;
 
 function TServerSettings.LoadFromFile: Boolean;

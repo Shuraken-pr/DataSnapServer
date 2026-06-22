@@ -190,6 +190,8 @@ begin
   ConnDef.Params.Pooled := True;
   // ИСПРАВЛЕНО: размер пула вынесен в константу (можно перенести в конфиг)
   ConnDef.Params.PoolMaximumItems := 10;
+  // Сохраняем изменения в памяти (не обязательно на диск)
+  ConnDef.Apply;
 
   FDManager1.Active := True;
 end;
@@ -231,11 +233,19 @@ begin
   FServer := TIdHTTPWebBrokerBridge.Create(Self);
   try
     CheckAndLoadSettings;
-    StartConn.ConnectionDefName := CONN_DEF_NAME;
+    StartConn.Params.Clear;
+    StartConn.DriverName := 'PG';
+    StartConn.Params.Add('Server=' + AppSettings.Host);
+    StartConn.Params.Add('Port=' + AppSettings.Port.ToString);
+    StartConn.Params.Add('Database=' + AppSettings.Database);
+    StartConn.Params.Add('User_Name=' + AppSettings.Username);
+    StartConn.Params.Add('Password=' + AppSettings.Password);
+//    StartConn.ConnectionDefName := CONN_DEF_NAME;
     if not StartConn.Connected then
       StartConn.Open;
     qryClearSession.ExecSQL;
     Log.Info('Настройки успешно загружены и применены. Сервер готов к запуску.');
+    tmrCheckSessions.Enabled := true;
   except
     on E: Exception do
     begin
