@@ -1,4 +1,4 @@
-﻿unit ServerMethodsUnitMain;
+unit ServerMethodsUnitMain;
 
 interface
 
@@ -265,6 +265,21 @@ begin
             raise Exception.CreateFmt('Missing or invalid "details" in item %d', [I]);
 
           Details := TJSONObject(DetailsVal);
+
+          // 🔑 ВАЛИДАЦИЯ КООРДИНАТ: lat должно быть -90..90, lon -180..180
+          var LatVal, LonVal: TJSONValue;
+          LatVal := Details.GetValue('lat');
+          LonVal := Details.GetValue('lon');
+          if (LatVal <> nil) and (LatVal is TJSONNumber) then
+          begin
+            if (TJSONNumber(LatVal).AsDouble < -90.0) or (TJSONNumber(LatVal).AsDouble > 90.0) then
+              raise Exception.CreateFmt('Invalid latitude in item %d: must be between -90 and 90', [I]);
+          end;
+          if (LonVal <> nil) and (LonVal is TJSONNumber) then
+          begin
+            if (TJSONNumber(LonVal).AsDouble < -180.0) or (TJSONNumber(LonVal).AsDouble > 180.0) then
+              raise Exception.CreateFmt('Invalid longitude in item %d: must be between -180 and 180', [I]);
+          end;
 
           // Парсинг occurred_at
           OccurredAtStr := Item.GetValue<string>('occurred_at', '');

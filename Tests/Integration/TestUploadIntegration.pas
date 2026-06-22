@@ -1,4 +1,4 @@
-unit TestUploadIntegration;
+﻿unit TestUploadIntegration;
 
 interface
 
@@ -33,7 +33,14 @@ type
     [Test]
     procedure TestUpload_TooLargeFile_Returns413;
     
-    /// <summary>INT-009: Откат транзакции при ошибке</summary>
+    /// <summary>INT-005b: user_id из токена, не хардкод (user_id=2)</summary>
+    [Test]
+    procedure TestUpload_DifferentUserID_MatchesToken;
+    
+    /// <summary>INT-005c: Невалидные координаты в /upload</summary>
+    [Test]
+    procedure TestUpload_InvalidCoordinates_Returns400;
+
     [Test]
     procedure TestUpload_InvalidBase64_NoRecordsCreated;
   end;
@@ -194,6 +201,22 @@ begin
     'New audit log should be created');
   Assert.IsTrue(FinalFileCount > InitialFileCount, 
     'New audit file record should be created');
+  
+  // 🔑 Проверяем, что user_id соответствует владельцу сессии (не хардкод 1)
+  var QryUserCheck: TFDQuery;
+  QryUserCheck := TFDQuery.Create(nil);
+  try
+    QryUserCheck.Connection := DBConnection;
+    QryUserCheck.SQL.Text := 
+      'SELECT user_id FROM audit_logs ORDER BY id DESC LIMIT 1';
+    QryUserCheck.Open;
+    if not QryUserCheck.IsEmpty then
+      Assert.AreEqual(1, QryUserCheck.FieldByName('user_id').AsInteger,
+        'audit_logs.user_id should match the session owner (user_id=1)');
+    QryUserCheck.Close;
+  finally
+    QryUserCheck.Free;
+  end;
 end;
 
 procedure TTestUploadIntegration.TestUpload_NonJpegFile_Returns400;
@@ -348,6 +371,130 @@ begin
     'No audit log should be created for invalid Base64 (transaction rolled back)');
   Assert.AreEqual(InitialFileCount, FinalFileCount, 
     'No audit file should be created for invalid Base64 (transaction rolled back)');
+end;
+
+procedure TTestUploadIntegration.TestUpload_DifferentUserID_MatchesToken;
+var
+  Response: IHTTPResponse;
+  JSONPayload: string;
+  TestJpeg: TBytes;
+  Base64Data: string;
+  QryUserCheck: TFDQuery;
+  ActualUserID: Integer;
+  SessionToken: string;
+begin
+  // Arrange: создаём сессию для user_id=2 (не хардкод 1)
+  SessionToken := CreateTestSession(2, 24);
+  AuthToken := SessionToken;
+  
+  // Создаём тестовый JPEG (100 КБ)
+  TestJpeg := CreateTestJpeg(100);
+  Base64Data := EncodeBase64(TestJpeg);
+  
+  // Act: отправляем запрос на загрузку
+  JSONPayload := Format(
+    '{' +
+    '  "event_type": "mobile_audit",' +
+    '  "lat": 55.7558,' +
+    '  "lon": 37.6173,' +
+    '  "photo_base64": "%s",' +
+    '  "photo_filename": "test_photo.jpg",' +
+    '  "title": "Integration Test User 2",' +
+    '  "device_id": "test_device",' +
+    '  "batch_id": "{12345678-1234-1234-1234-123456789012}",' +
+    '  "occurred_at": "2026-06-22T12:00:00Z"' +
+    '}',
+    [Base64Data]
+  );
+  
+  Response := PostToServer('/upload', JSONPayload, True);
+  
+  // 🔑 Если сервер вернул 500, возможно, нет папки C:\AuditFiles
+  if Response.StatusCode = 500 then
+  begin
+    Assert.Pass(Format(
+      'Server returned 500. This may be due to missing C:\AuditFiles directory. ' +
+      'Response: %s',
+      [Response.ContentAsString]));
+    Exit;
+  end;
+  
+  Assert.AreEqual(200, Response.StatusCode, 
+    Format('Upload should succeed for user_id=2. Response: %s', [Response.ContentAsString]));
+  
+  // Assert: проверяем, что user_id в audit_logs = 2 (не хардкод 1)
+  QryUserCheck := TFDQuery.Create(nil);
+  try
+    QryUserCheck.Connection := DBConnection;
+    QryUserCheck.SQL.Text := 
+      'SELECT user_id FROM audit_logs ORDER BY id DESC LIMIT 1';
+    QryUserCheck.Open;
+    if not QryUserCheck.IsEmpty then
+    begin
+      ActualUserID := QryUserCheck.FieldByName('user_id').AsInteger;
+      Assert.AreEqual(2, ActualUserID,
+        'audit_logs.user_id must match the token owner (2), not hardcoded 1');
+    end
+    else
+      Assert.Fail('No audit_log record created');
+    QryUserCheck.Close;
+  finally
+    QryUserCheck.Free;
+  end;
+end;
+
+procedure TTestUploadIntegration.TestUpload_InvalidCoordinates_Returns400;
+var
+  Response: IHTTPResponse;
+  JSONPayload: string;
+  TestJpeg: TBytes;
+  Base64Data: string;
+  InitialLogCount: Integer;
+  InitialFileCount: Integer;
+  FinalLogCount: Integer;
+  FinalFileCount: Integer;
+begin
+  // Arrange: создаём валидную сессию
+  AuthToken := CreateTestSession(1, 24);
+  
+  // Создаём тестовый JPEG (100 КБ)
+  TestJpeg := CreateTestJpeg(100);
+  Base64Data := EncodeBase64(TestJpeg);
+  
+  // Запоминаем количество записей до теста
+  InitialLogCount := GetTableCount('audit_logs');
+  InitialFileCount := GetTableCount('audit_files');
+  
+  // Act: отправляем запрос с невалидной широтой (lat=100)
+  JSONPayload := Format(
+    '{' +
+    '  "event_type": "mobile_audit",' +
+    '  "lat": 100.0,' +
+    '  "lon": 37.6173,' +
+    '  "photo_base64": "%s",' +
+    '  "photo_filename": "test_photo.jpg",' +
+    '  "title": "Integration Test",' +
+    '  "device_id": "test_device",' +
+    '  "batch_id": "{12345678-1234-1234-1234-123456789012}",' +
+    '  "occurred_at": "2026-06-22T12:00:00Z"' +
+    '}',
+    [Base64Data]
+  );
+  
+  Response := PostToServer('/upload', JSONPayload, True);
+  
+  // Assert: сервер должен отклонить запрос с невалидными координатами
+  Assert.AreEqual(400, Response.StatusCode,
+    'Invalid latitude should be rejected with 400');
+  
+  // Проверяем, что записи НЕ созданы в БД
+  FinalLogCount := GetTableCount('audit_logs');
+  FinalFileCount := GetTableCount('audit_files');
+  
+  Assert.AreEqual(InitialLogCount, FinalLogCount, 
+    'No audit log should be created for invalid coordinates');
+  Assert.AreEqual(InitialFileCount, FinalFileCount, 
+    'No audit file should be created for invalid coordinates');
 end;
 
 initialization

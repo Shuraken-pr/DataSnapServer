@@ -3,7 +3,8 @@
 interface
 
 uses
-  DUnitX.TestFramework, TestBase, System.JSON, FireDAC.DApt, System.Generics.Collections;
+  DUnitX.TestFramework, TestBase, System.JSON, FireDAC.DApt, FireDAC.Comp.Client,
+  System.Generics.Collections;
 
 type
   /// <summary>
@@ -36,6 +37,14 @@ type
     /// <summary>INT-008: Истечение сессии</summary>
     [Test]
     procedure TestExpiredToken_AccessProtectedEndpoint_Returns401;
+    
+    /// <summary>INT-011: Несколько валидных токенов для одного пользователя</summary>
+    [Test]
+    procedure TestSession_MultipleTokens_SameUser;
+    
+    /// <summary>INT-012: Очистка тестовых данных удаляет сессии</summary>
+    [Test]
+    procedure TestSession_CleanupTestData_RemovesSessions;
   end;
 
 implementation
@@ -236,6 +245,101 @@ begin
   FinalEventCount := GetTableCount('events');
   Assert.AreEqual(InitialEventCount, FinalEventCount, 
     'No event should be created for expired token');
+end;
+
+procedure TTestLoginIntegration.TestSession_MultipleTokens_SameUser;
+var
+  Token1, Token2: string;
+  Response1, Response2: IHTTPResponse;
+  JSONPayload: string;
+  InitialEventCount: Integer;
+  FinalEventCount: Integer;
+begin
+  // Arrange: создаём две валидные сессии для одного пользователя
+  Token1 := CreateTestSession(1, 24);
+  Token2 := CreateTestSession(1, 24);
+  
+  // Сессии должны быть разными
+  Assert.AreNotEqual(Token1, Token2, 'Two sessions should have different tokens');
+  
+  InitialEventCount := GetTableCount('events');
+  
+  JSONPayload := 
+    '{"AJsonData": [' +
+    '  {' +
+    '    "event_type": "mobile_audit",' +
+    '    "occurred_at": "2026-06-22T12:00:00Z",' +
+    '    "details": {' +
+    '      "photo_path": "/test/path.jpg",' +
+    '      "lat": 55.75,' +
+    '      "lon": 37.62' +
+    '    }' +
+    '  }' +
+    ']}';
+  
+  // Act: используем первый токен
+  AuthToken := Token1;
+  Response1 := PostToServer('/datasnap/rest/TServerMethods1/SyncUpload', JSONPayload, True);
+  
+  // Assert: первый токен работает
+  Assert.AreEqual(200, Response1.StatusCode, 
+    'First token should be valid');
+  
+  // Act: используем второй токен
+  AuthToken := Token2;
+  Response2 := PostToServer('/datasnap/rest/TServerMethods1/SyncUpload', JSONPayload, True);
+  
+  // Assert: второй токен тоже работает
+  Assert.AreEqual(200, Response2.StatusCode, 
+    'Second token should also be valid');
+  
+  // Проверяем, что оба запроса создали записи
+  FinalEventCount := GetTableCount('events');
+  Assert.AreEqual(InitialEventCount + 2, FinalEventCount, 
+    'Both sessions should create separate events');
+end;
+
+procedure TTestLoginIntegration.TestSession_CleanupTestData_RemovesSessions;
+var
+  Token: string;
+  SessionCountBefore, SessionCountAfter: Integer;
+  Qry: TFDQuery;
+begin
+  // Arrange: создаём сессию
+  Token := CreateTestSession(1, 24);
+  
+  // Проверяем, что сессия создана
+  Qry := TFDQuery.Create(nil);
+  try
+    Qry.Connection := DBConnection;
+    Qry.SQL.Text := 'SELECT COUNT(*) FROM user_sessions WHERE session_token = :token';
+    Qry.ParamByName('token').AsString := Token;
+    Qry.Open;
+    SessionCountBefore := Qry.Fields[0].AsInteger;
+    Qry.Close;
+  finally
+    Qry.Free;
+  end;
+  
+  Assert.AreEqual(1, SessionCountBefore, 'Session should exist in database');
+  
+  // Act: вызываем cleanup (как в TearDown)
+  CleanupTestData;
+  
+  // Assert: проверяем, что сессия удалена
+  Qry := TFDQuery.Create(nil);
+  try
+    Qry.Connection := DBConnection;
+    Qry.SQL.Text := 'SELECT COUNT(*) FROM user_sessions WHERE session_token = :token';
+    Qry.ParamByName('token').AsString := Token;
+    Qry.Open;
+    SessionCountAfter := Qry.Fields[0].AsInteger;
+    Qry.Close;
+  finally
+    Qry.Free;
+  end;
+  
+  Assert.AreEqual(0, SessionCountAfter, 'Cleanup should remove all sessions');
 end;
 
 initialization

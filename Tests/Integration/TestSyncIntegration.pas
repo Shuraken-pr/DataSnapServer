@@ -1,4 +1,4 @@
-﻿unit TestSyncIntegration;
+unit TestSyncIntegration;
 
 interface
 
@@ -215,25 +215,39 @@ begin
 
   Response := PostToServer('/datasnap/rest/TServerMethods1/SyncUpload', JSONPayload, True);
 
-  // Assert: проверяем, что сервер отклонил запрос (если валидация реализована)
-  if Response.StatusCode = 400 then
-  begin
-    // Проверяем, что запись НЕ создана в БД
-    FinalEventCount := GetTableCount('events');
-    Assert.AreEqual(InitialEventCount, FinalEventCount,
-      'No event should be created for invalid coordinates');
-  end
-  else if Response.StatusCode = 200 then
-  begin
-    // Если сервер не валидирует координаты, пропускаем тест
-    Assert.Pass(
-      'Server does not validate coordinates. ' +
-      'This test requires coordinate validation to be implemented.');
-  end
-  else
-  begin
-    Assert.Fail(Format('Unexpected status code: %d', [Response.StatusCode]));
+  // Assert: DataSnap возвращает HTTP 200 даже для ошибок внутри метода
+  Assert.AreEqual(200, Response.StatusCode,
+    'SyncUpload returns HTTP 200, but JSON contains error');
+
+  // Проверяем, что в JSON есть ошибка
+  var JSONResp := TJSONObject.ParseJSONValue(Response.ContentAsString) as TJSONObject;
+  try
+    Assert.IsNotNull(JSONResp, 'Response should be valid JSON');
+
+    // 🔑 DataSnap REST оборачивает string в {"result": [...]}
+    var ResultArr := JSONResp.GetValue('result') as TJSONArray;
+    Assert.IsNotNull(ResultArr, 'DataSnap should return result array');
+    Assert.AreEqual(1, ResultArr.Count, 'Result array should have one element');
+
+    // Распарсить внутренний JSON (строка, которую вернул метод)
+    var InnerStr := ResultArr.Items[0].Value;
+    var InnerObj := TJSONObject.ParseJSONValue(InnerStr) as TJSONObject;
+    try
+      Assert.IsNotNull(InnerObj, 'Inner response should be valid JSON');
+      if InnerObj.GetValue('result') <> nil then
+        Assert.AreEqual('error', InnerObj.GetValue('result').Value,
+          'Invalid coordinates should return error result');
+    finally
+      InnerObj.Free;
+    end;
+  finally
+    JSONResp.Free;
   end;
+
+  // Проверяем, что запись НЕ создана в БД (транзакция откатилась)
+  FinalEventCount := GetTableCount('events');
+  Assert.AreEqual(InitialEventCount, FinalEventCount,
+    'No event should be created for invalid coordinates');
 end;
 
 procedure TTestSyncIntegration.TestSync_EmptyArray_Returns200NoRecords;

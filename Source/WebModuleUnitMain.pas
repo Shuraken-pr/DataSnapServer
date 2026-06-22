@@ -1,4 +1,4 @@
-﻿unit WebModuleUnitMain;
+unit WebModuleUnitMain;
 
 // ИСПРАВЛЕНО по итогам код-ревью:
 //   [CRITICAL] Добавлена базовая аутентификация через TDSAuthenticationManager
@@ -219,6 +219,22 @@ begin
           Lat := (Payload.GetValue('lat') as TJSONNumber).AsDouble;
         if Payload.GetValue('lon') <> nil then
           Lon := (Payload.GetValue('lon') as TJSONNumber).AsDouble;
+
+        // 🔑 ВАЛИДАЦИЯ КООРДИНАТ: lat должно быть -90..90, lon -180..180
+        if (Lat < -90.0) or (Lat > 90.0) then
+        begin
+          Response.StatusCode := 400;
+          Response.ContentType := 'application/json';
+          Response.Content := '{"result":"error","message":"Invalid latitude: must be between -90 and 90"}';
+          Exit;
+        end;
+        if (Lon < -180.0) or (Lon > 180.0) then
+        begin
+          Response.StatusCode := 400;
+          Response.ContentType := 'application/json';
+          Response.Content := '{"result":"error","message":"Invalid longitude: must be between -180 and 180"}';
+          Exit;
+        end;
 
         PhotoBase64 := '';
         if Payload.GetValue('photo_base64') <> nil then

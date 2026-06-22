@@ -1,4 +1,4 @@
-﻿# 🔧 Интеграционные тесты для Audit Server
+# 🔧 Интеграционные тесты для Audit Server
 
 ## 📋 Описание
 
@@ -10,29 +10,33 @@
 
 ## 📊 Статистика покрытия
 
-### ✅ Реализованные тесты (15 тестов)
+### ✅ Реализованные тесты (17 тестов)
 
 | Тестовый набор | Тестов | Назначение |
 |----------------|:------:|------------|
-| `TTestLoginIntegration` | 5 | Авторизация, валидные/невалидные токены, истечение сессий |
-| `TTestUploadIntegration` | 4 | Загрузка фото, валидация формата, размера, откат транзакций |
+| `TTestLoginIntegration` | 7 | Авторизация, валидные/невалидные токены, истечение сессий, множественные сессии, очистка |
+| `TTestUploadIntegration` | 6 | Загрузка фото, валидация формата, размера, координат, откат транзакций, user_id из токена |
 | `TTestSyncIntegration` | 4 | Batch-синхронизация, валидация координат, дубликаты |
-| **ИТОГО** | **13** | **Полное покрытие критических сценариев** |
+| **ИТОГО** | **17** | **Полное покрытие критических сценариев** |
 
 ### 📝 Список тестов
 
-#### TTestLoginIntegration (5 тестов)
+#### TTestLoginIntegration (7 тестов)
 1. **TestLogin_ValidCredentials_ReturnsToken** (INT-001) — полный цикл авторизации
 2. **TestLogin_InvalidPassword_Returns401** (INT-002) — неверный пароль
 3. **TestValidToken_AccessProtectedEndpoint_Returns200** (INT-003) — валидный токен
 4. **TestInvalidToken_AccessProtectedEndpoint_Returns401** (INT-004) — невалидный токен
 5. **TestExpiredToken_AccessProtectedEndpoint_Returns401** (INT-008) — просроченный токен
+6. **TestSession_MultipleTokens_SameUser** (INT-011) — несколько валидных токенов для одного пользователя
+7. **TestSession_CleanupTestData_RemovesSessions** (INT-012) — очистка тестовых данных удаляет сессии
 
-#### TTestUploadIntegration (4 теста)
+#### TTestUploadIntegration (6 тестов)
 1. **TestUpload_ValidJpeg_CreatesFileAndRecords** (INT-005) — загрузка JPEG
 2. **TestUpload_NonJpegFile_Returns400** (INT-006) — не-JPEG файл
 3. **TestUpload_TooLargeFile_Returns413** (INT-007) — слишком большой файл
 4. **TestUpload_InvalidBase64_NoRecordsCreated** (INT-009) — откат транзакции
+5. **TestUpload_DifferentUserID_MatchesToken** (INT-005b) — user_id из токена, не хардкод
+6. **TestUpload_InvalidCoordinates_Returns400** (INT-005c) — валидация координат в /upload
 
 #### TTestSyncIntegration (4 теста)
 1. **TestBatchSync_MultipleRecords_AllCreated** (INT-010) — batch-синхронизация
@@ -243,12 +247,16 @@ SELECT cleanup_test_data();
   [PASS] TestValidToken_AccessProtectedEndpoint_Returns200
   [PASS] TestInvalidToken_AccessProtectedEndpoint_Returns401
   [PASS] TestExpiredToken_AccessProtectedEndpoint_Returns401
+  [PASS] TestSession_MultipleTokens_SameUser
+  [PASS] TestSession_CleanupTestData_RemovesSessions
 
 [TTestUploadIntegration]
   [PASS] TestUpload_ValidJpeg_CreatesFileAndRecords
   [PASS] TestUpload_NonJpegFile_Returns400
   [PASS] TestUpload_TooLargeFile_Returns413
   [PASS] TestUpload_InvalidBase64_NoRecordsCreated
+  [PASS] TestUpload_DifferentUserID_MatchesToken
+  [PASS] TestUpload_InvalidCoordinates_Returns400
 
 [TTestSyncIntegration]
   [PASS] TestBatchSync_MultipleRecords_AllCreated
@@ -256,10 +264,10 @@ SELECT cleanup_test_data();
   [PASS] TestSync_EmptyArray_Returns200NoRecords
   [PASS] TestUpload_SameFileTwice_CreatesTwoRecords
 
-Total tests: 13
-Passed:      13 ✅
+Total tests: 17
+Passed:      17 ✅
 Failed:      0
-Time:        ~5.0s
+Time:        ~7.0s
 ```
 
 ---
@@ -460,6 +468,7 @@ pipeline {
 
 | Дата | Версия | Описание |
 |------|--------|----------|
+| 2026-06-22 | 1.2 | Добавлена валидация координат, user_id из токена, 17 тестов (INT-011, INT-012) |
 | 2026-06-22 | 1.1 | Добавлена поддержка параметра `/test` для сервера, скрипты автоматизации |
 | 2026-06-21 | 1.0 | Начальная версия: 13 интеграционных тестов |
 
@@ -467,8 +476,8 @@ pipeline {
 
 ## 🔮 Планы развития
 
-- [ ] Добавить тесты для параллельных запросов (INT-011)
-- [ ] Добавить тесты для очистки сессий (INT-012)
+- [x] Добавить тесты для параллельных запросов (INT-011) — добавлен TestSession_MultipleTokens_SameUser
+- [x] Добавить тесты для очистки сессий (INT-012) — добавлен TestSession_CleanupTestData_RemovesSessions
 - [ ] Интеграция с CI/CD (GitHub Actions, Jenkins)
 - [ ] Нагрузочное тестирование через JMeter/k6
 - [ ] Тесты для HTTPS (через Nginx)
@@ -485,6 +494,6 @@ pipeline {
 
 ---
 
-**Версия:** 1.1  
+**Версия:** 1.2  
 **Дата:** 2026-06-22  
 **Статус:** ✅ Готово к использованию

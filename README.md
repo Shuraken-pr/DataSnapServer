@@ -67,27 +67,63 @@ DataSnapServer/
 --    В дальнейшем рекомендуется создать собственную таблицу с хэшированием паролей (bcrypt/Argon2).
 
 -- 2. Таблица активных сессий
-CREATE TABLE user_sessions (
-    id SERIAL PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS user_sessions (
+    session_id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL,  -- ID из pg_user.usesysid
-    session_token VARCHAR(64) UNIQUE NOT NULL,
+    session_token VARCHAR(255) UNIQUE NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP NOT NULL
 );
 
 -- Критически важный индекс для молниеносной проверки токена при каждом запросе
-CREATE INDEX idx_user_sessions_token ON user_sessions(session_token);
+CREATE INDEX IF NOT EXISTS idx_sessions_token ON user_sessions(session_token);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON user_sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON user_sessions(user_id);
 
--- 3. Целевая таблица событий (пример)
-CREATE TABLE events (
+-- 3. Таблица событий (для batch-синхронизации через SyncUpload)
+CREATE TABLE IF NOT EXISTS events (
     id SERIAL PRIMARY KEY,
-    user_id INT NOT NULL,
+    user_id INTEGER NOT NULL,
     event_type VARCHAR(50) NOT NULL,
     occurred_at TIMESTAMP NOT NULL,
-    metadata JSONB
+    metadata JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 4. Очистка просроченных сессий (выполняется при старте сервера)
+CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id);
+CREATE INDEX IF NOT EXISTS idx_events_occurred ON events(occurred_at);
+
+-- 4. Таблица журналов аудита (для endpoint /upload)
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    event_type VARCHAR(50) NOT NULL,
+    occurred_at TIMESTAMP NOT NULL,
+    location point,  -- PostgreSQL native point type: (lon, lat)
+    details JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_occurred ON audit_logs(occurred_at);
+
+-- 5. Таблица файлов аудита (связь с audit_logs)
+CREATE TABLE IF NOT EXISTS audit_files (
+    id SERIAL PRIMARY KEY,
+    log_id INTEGER REFERENCES audit_logs(id) ON DELETE CASCADE,
+    file_uuid UUID NOT NULL,
+    storage_path VARCHAR(500) NOT NULL,
+    original_filename VARCHAR(255),
+    file_size BIGINT NOT NULL,
+    checksum_sha256 VARCHAR(64) NOT NULL,
+    mime_type VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_files_log ON audit_files(log_id);
+CREATE INDEX IF NOT EXISTS idx_audit_files_uuid ON audit_files(file_uuid);
+
+-- 6. Очистка просроченных сессий (выполняется при старте сервера)
 DELETE FROM user_sessions WHERE expires_at < CURRENT_TIMESTAMP;
 ```
 
@@ -313,7 +349,7 @@ POST /upload
 
 ## 🧪 Автоматическое тестирование
 
-Проект покрыт **55 автоматическими тестами** (42 модульных + 13 интеграционных) на фреймворке **DUnitX** со **100% успешным прохождением**.
+Проект покрыт **59 автоматическими тестами** (42 модульных + 17 интеграционных) на фреймворке **DUnitX** со **100% успешным прохождением**.
 
 ### Модульные тесты (42 теста)
 
@@ -326,14 +362,14 @@ POST /upload
 | Парсинг Upload Payload | 6 | Base64-кодирование, координаты, метаданные, обработка больших файлов |
 | **ИТОГО** | **42** | **100% прохождение** ✅ |
 
-### Интеграционные тесты (13 тестов)
+### Интеграционные тесты (17 тестов)
 
 | Модуль | Тестов | Что проверяется |
 |--------|:------:|------------------|
-| Авторизация (Login) | 5 | Полный цикл авторизации, валидные/невалидные токены, истечение сессий |
-| Загрузка файлов | 4 | Загрузка JPEG, валидация формата/размера, откат транзакций |
-| Синхронизация | 4 | Batch-синхронизация, валидация координат, дубликаты |
-| **ИТОГО** | **13** | **100% прохождение** ✅ |
+| Авторизация (Login) | 7 | Полный цикл авторизации, валидные/невалидные токены, истечение сессий, множественные сессии, очистка |
+| Загрузка файлов | 6 | Загрузка JPEG, валидация формата/размера/координат, откат транзакций, user_id из токена |
+| Синхронизация | 4 | Batch-синхронизация, валидация координат, дубликаты, пустой массив |
+| **ИТОГО** | **17** | **100% прохождение** ✅ |
 
 ### Запуск модульных тестов
 
