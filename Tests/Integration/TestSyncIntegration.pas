@@ -3,7 +3,8 @@ unit TestSyncIntegration;
 interface
 
 uses
-  DUnitX.TestFramework, TestBase, System.JSON, System.SysUtils, FireDAC.Comp.Client, FireDAC.DApt, Data.DB;
+  DUnitX.TestFramework, TestBase, System.JSON, System.SysUtils,
+  System.Generics.Collections, FireDAC.Comp.Client, FireDAC.DApt, Data.DB;
 
 type
   /// <summary>
@@ -88,7 +89,7 @@ var
   FinalLogCount: Integer;
   I: Integer;
   Qry: TFDQuery;
-  UserIds: TArray<Integer>;
+  UserIds: TArray<Int64>;
   Items: TArray<string>;
   ItemObj: TJSONObject;
   DetailsObj: TJSONObject;
@@ -96,7 +97,7 @@ var
   SB: TStringBuilder;
 begin
   // Arrange: создаём валидную сессию
-  AuthToken := CreateTestSession(1, 24);
+  AuthToken := CreateTestSession(GetTestUserID, 24);
 
   // Запоминаем количество записей до теста
   InitialLogCount := GetTableCount('events');
@@ -173,14 +174,14 @@ begin
     while not Qry.Eof do
     begin
       SetLength(UserIds, Length(UserIds) + 1);
-      UserIds[High(UserIds)] := Qry.FieldByName('user_id').AsInteger;
+      UserIds[High(UserIds)] := Qry.FieldByName('user_id').AsLargeInt;
       Qry.Next;
     end;
     Qry.Close;
 
     Assert.AreEqual(1, Length(UserIds),
       'All records should have the same user_id');
-    Assert.AreEqual(1, UserIds[0],
+    Assert.AreEqual(GetTestUserID, UserIds[0],
       'user_id should match the session owner');
   finally
     Qry.Free;
@@ -195,7 +196,7 @@ var
   FinalEventCount: Integer;
 begin
   // Arrange: создаём валидную сессию
-  AuthToken := CreateTestSession(1, 24);
+  AuthToken := CreateTestSession(GetTestUserID, 24);
 
   InitialEventCount := GetTableCount('events');
 
@@ -258,7 +259,7 @@ var
   FinalEventCount: Integer;
 begin
   // Arrange: создаём валидную сессию
-  AuthToken := CreateTestSession(1, 24);
+  AuthToken := CreateTestSession(GetTestUserID, 24);
 
   InitialEventCount := GetTableCount('events');
 
@@ -292,7 +293,7 @@ var
   FinalFileCount: Integer;
 begin
   // Arrange: создаём валидную сессию
-  AuthToken := CreateTestSession(1, 24);
+  AuthToken := CreateTestSession(GetTestUserID, 24);
 
   // Создаём тестовый JPEG
   TestJpeg := CreateTestJpeg(100);

@@ -1,29 +1,117 @@
-# 🔧 Интеграционные тесты для Audit Server
+# Интеграционные тесты DataSnap Server
 
-## 📋 Описание
+## Обзор
 
-Интеграционные тесты проверяют **взаимодействие между компонентами системы** в условиях, максимально приближенных к продакшену:
-- Android-клиент ↔ DataSnap-сервер ↔ PostgreSQL
-- Реальные HTTP-запросы
-- Реальные транзакции в БД
-- Реальные файлы на диске
+Этот проект содержит интеграционные тесты для DataSnap REST-сервера. Тесты выполняются через реальное HTTP-соединение с сервером и проверяют работу endpoints вместе с базой данных PostgreSQL.
 
-## 📊 Статистика покрытия
+## Требования
 
-### ✅ Реализованные тесты (17 тестов)
+- **Delphi 12** (или выше)
+- **DUnitX** (встроен в Delphi 12)
+- **PostgreSQL** (запущен через Docker Compose)
+- **DataSnap Server** (скомпилирован и запущен с параметром `/test`)
+- **Docker Desktop** (для Windows) или **Docker Engine** (для Linux)
+
+## Структура проекта
+
+| Файл | Назначение |
+|------|------------|
+| `IntegrationTests.dpr` | Главный файл проекта тестов |
+| `TestBase.pas` | Базовый класс с подключением к БД и HTTP-клиентом |
+| `TestLoginIntegration.pas` | Тесты авторизации (Login + токены) |
+| `TestSyncIntegration.pas` | Тесты синхронизации данных (SyncUpload) |
+| `TestUploadIntegration.pas` | Тесты загрузки файлов (POST /upload) |
+| `docker-compose.test.yml` | Docker Compose для тестовой БД |
+| `init-test-db.sql` | Скрипт инициализации тестовой БД |
+
+## Быстрый старт (одной командой)
+
+```bash
+cd DataSnapServer\Tests\Integration
+quick-start.bat
+```
+
+Скрипт `quick-start.bat` выполняет полный цикл: запуск Docker → запуск сервера → выполнение тестов.
+
+## Ручной запуск (пошагово)
+
+### 1. Запуск тестовой базы данных (PostgreSQL)
+
+```bash
+docker compose -f docker-compose.test.yml up -d
+```
+
+Контейнер `audit-test-db` запустится на порту **5433** (изолирован от production базы на 5432).
+
+### 2. Настройка сервера для тестов
+
+Сервер должен быть запущен с параметром `/test` для использования тестовых настроек:
+
+```bash
+cd DataSnapServer\Source\Win32\Debug
+AuditServer.exe /test
+```
+
+Или настройте ярлык для запуска с параметром `/test`.
+
+### 3. Компиляция и запуск тестов
+
+```bash
+cd DataSnapServer\Tests\Integration
+# Компиляция (Delphi IDE)
+# Откройте IntegrationTests.dpr в Delphi и нажмите Ctrl+F9
+
+# Запуск тестов
+Win32\Debug\IntegrationTests.exe
+```
+
+## Результаты тестов
+
+Тесты сохраняют результаты в файл `dunitx-results.xml` в формате XML для интеграции с CI/CD.
+
+Пример вывода:
+```xml
+<testsuites>
+  <testsuite name="TTestLoginIntegration" tests="7" failures="0" time="3.0">
+    <testcase name="TestLogin_ValidCredentials_ReturnsToken" time="0.5"/>
+    <testcase name="TestLogin_InvalidPassword_Returns401" time="0.5"/>
+    <testcase name="TestValidToken_AccessProtectedEndpoint_Returns200" time="0.5"/>
+    <testcase name="TestInvalidToken_AccessProtectedEndpoint_Returns401" time="0.5"/>
+    <testcase name="TestExpiredToken_AccessProtectedEndpoint_Returns401" time="0.5"/>
+    <testcase name="TestSession_MultipleTokens_SameUser" time="0.5"/>
+    <testcase name="TestSession_CleanupTestData_RemovesSessions" time="0.5"/>
+  </testsuite>
+  <testsuite name="TTestUploadIntegration" tests="6" failures="0" time="2.8">
+    <testcase name="TestUpload_ValidJpeg_CreatesFileAndRecords" time="0.7"/>
+    <testcase name="TestUpload_NonJpegFile_Returns400" time="0.5"/>
+    <testcase name="TestUpload_TooLargeFile_Returns413" time="0.5"/>
+    <testcase name="TestUpload_InvalidBase64_NoRecordsCreated" time="0.5"/>
+    <testcase name="TestUpload_DifferentUserID_MatchesToken" time="0.8"/>
+    <testcase name="TestUpload_InvalidCoordinates_Returns400" time="0.8"/>
+  </testsuite>
+  <testsuite name="TTestSyncIntegration" tests="4" failures="0" time="2.0">
+    <testcase name="TestBatchSync_MultipleRecords_AllCreated" time="0.8"/>
+    <testcase name="TestSync_InvalidCoordinates_Returns400" time="0.5"/>
+    <testcase name="TestSync_EmptyArray_Returns200NoRecords" time="0.4"/>
+    <testcase name="TestUpload_SameFileTwice_CreatesTwoRecords" time="0.3"/>
+  </testsuite>
+</testsuites>
+```
+
+## ✅ Реализованные тесты (17 тестов)
 
 | Тестовый набор | Тестов | Назначение |
 |----------------|:------:|------------|
 | `TTestLoginIntegration` | 7 | Авторизация, валидные/невалидные токены, истечение сессий, множественные сессии, очистка |
-| `TTestUploadIntegration` | 6 | Загрузка фото, валидация формата, размера, координат, откат транзакций, user_id из токена |
-| `TTestSyncIntegration` | 4 | Batch-синхронизация, валидация координат, дубликаты |
+| `TTestUploadIntegration` | 6 | Загрузка фото, валидация формата/размера/координат, откат транзакций, user_id из токена |
+| `TTestSyncIntegration` | 4 | Batch-синхронизация, валидация координат, дубликаты, пустой массив |
 | **ИТОГО** | **17** | **Полное покрытие критических сценариев** |
 
-### 📝 Список тестов
+### Подробное описание тестов
 
 #### TTestLoginIntegration (7 тестов)
-1. **TestLogin_ValidCredentials_ReturnsToken** (INT-001) — полный цикл авторизации
-2. **TestLogin_InvalidPassword_Returns401** (INT-002) — неверный пароль
+1. **TestLogin_ValidCredentials_ReturnsToken** (INT-001) — полный цикл авторизации через таблицу users с bcrypt
+2. **TestLogin_InvalidPassword_Returns401** (INT-002) — неверный пароль (bcrypt отклоняет)
 3. **TestValidToken_AccessProtectedEndpoint_Returns200** (INT-003) — валидный токен
 4. **TestInvalidToken_AccessProtectedEndpoint_Returns401** (INT-004) — невалидный токен
 5. **TestExpiredToken_AccessProtectedEndpoint_Returns401** (INT-008) — просроченный токен
@@ -31,469 +119,106 @@
 7. **TestSession_CleanupTestData_RemovesSessions** (INT-012) — очистка тестовых данных удаляет сессии
 
 #### TTestUploadIntegration (6 тестов)
-1. **TestUpload_ValidJpeg_CreatesFileAndRecords** (INT-005) — загрузка JPEG
+1. **TestUpload_ValidJpeg_CreatesFileAndRecords** (INT-005) — загрузка JPEG, проверка user_id из токена
 2. **TestUpload_NonJpegFile_Returns400** (INT-006) — не-JPEG файл
 3. **TestUpload_TooLargeFile_Returns413** (INT-007) — слишком большой файл
 4. **TestUpload_InvalidBase64_NoRecordsCreated** (INT-009) — откат транзакции
-5. **TestUpload_DifferentUserID_MatchesToken** (INT-005b) — user_id из токена, не хардкод
+5. **TestUpload_DifferentUserID_MatchesToken** (INT-005b) — user_id из токена, не хардкод (user_id=2)
 6. **TestUpload_InvalidCoordinates_Returns400** (INT-005c) — валидация координат в /upload
 
 #### TTestSyncIntegration (4 теста)
-1. **TestBatchSync_MultipleRecords_AllCreated** (INT-010) — batch-синхронизация
-2. **TestSync_InvalidCoordinates_Returns400** (INT-013) — валидация координат
+1. **TestBatchSync_MultipleRecords_AllCreated** (INT-010) — batch из 10 записей
+2. **TestSync_InvalidCoordinates_Returns400** (INT-013) — невалидные координаты (lat=100) — валидация на сервере
 3. **TestSync_EmptyArray_Returns200NoRecords** (INT-014) — пустой массив
-4. **TestUpload_SameFileTwice_CreatesTwoRecords** (INT-015) — дубликаты
+4. **TestUpload_SameFileTwice_CreatesTwoRecords** (INT-015) — дублирование файла (разные UUID, одинаковый checksum)
 
----
+## 🔑 Особенности тестовой инфраструктуры
 
-## 🚀 Быстрый старт
+### Миграция тестовой БД
 
-### Шаг 1: Установка Docker Desktop
+Тестовая БД инициализируется через `init-test-db.sql`, который:
+- ✅ Создаёт таблицу `users` с полями из Postgre_Delphi (`id BIGINT GENERATED ALWAYS AS IDENTITY`)
+- ✅ Расширяет таблицу полями безопасности (`password_hash`, `is_active`, `role`, `last_login_at`, `failed_login_attempts`, `locked_until`)
+- ✅ Устанавливает расширение `pgcrypto` для bcrypt
+- ✅ Создаёт вспомогательные таблицы (`events`, `audit_logs`, `audit_files`, `user_sessions`)
+- ✅ Идемпотентен — можно запускать многократно
 
-Скачайте и установите Docker Desktop:
-- **Windows:** https://www.docker.com/products/docker-desktop
-
-Проверьте установку:
+**Проверка структуры:**
 ```bash
-docker --version
-docker compose version
+docker exec -it audit-test-db psql -U test_user -d audit_test -c "\d users"
 ```
 
-### Шаг 2: Запуск тестовой БД
+### Аутентификация через bcrypt (pgcrypto)
 
-Перейдите в папку с интеграционными тестами:
-```bash
-cd DataSnapServer\Tests\Integration
-```
+Сервер теперь использует собственную таблицу `users` с хешированием паролей через `bcrypt` (расширение `pgcrypto` PostgreSQL). Тестовый пользователь создаётся в `init-test-db.sql`:
 
-Запустите тестовую БД:
-```bash
-docker compose -f docker-compose.test.yml up -d
-```
-
-Проверьте статус:
-```bash
-docker compose -f docker-compose.test.yml ps
-```
-
-Ожидаемый вывод:
-```
-NAME            IMAGE              STATUS         PORTS                    NAMES
-audit-test-db   postgres:14-alpine Up (healthy)   0.0.0.0:5433->5432/tcp   audit-test-db
-```
-
-### Шаг 3: Первоначальная настройка сервера для тестов
-
-**⚠️ ВАЖНО:** Сервер DataSnap должен быть настроен на работу с тестовой БД. Для этого используется параметр командной строки `/test`.
-
-**Первый запуск (настройка):**
-```bash
-setup-test-env.bat
-```
-
-Этот скрипт:
-1. Запустит сервер с параметром `/test`
-2. Откроет диалог настройки подключения к БД
-3. Вам нужно будет указать параметры тестовой БД:
-   - Хост: `localhost`
-   - Порт: `5433`
-   - БД: `audit_test`
-   - Пользователь: `test_user`
-   - Пароль: `test_password`
-4. Сервер сохранит настройки в файл `db_settings_test.xml`
-
-**Последующие запуски:**
-После первоначальной настройки сервер можно запускать с параметром `/test` напрямую:
-```bash
-start "" "..\Win32\Debug\AuditServer.exe" /test
-```
-
-### Шаг 4: Запуск интеграционных тестов
-
-**Автоматический запуск (рекомендуется):**
-```bash
-run-integration-tests.bat
-```
-
-Этот скрипт:
-1. Проверит, что Docker-контейнер запущен
-2. Проверит, что сервер запущен с параметром `/test`
-3. Запустит интеграционные тесты
-4. Покажет результаты
-
-**Ручной запуск:**
-1. Откройте `IntegrationTests.dpr` в Delphi
-2. Нажмите **Ctrl+F9** (Compile)
-3. Нажмите **F9** (Run)
-
-Или из командной строки:
-```bash
-cd Win32\Debug
-.\IntegrationTests.exe
-```
-
----
-
-## 📁 Структура проекта
-
-```
-Integration/
-├── IntegrationTests.dpr              ← Главный файл проекта
-├── TestBase.pas                       ← Базовый класс для тестов
-├── TestLoginIntegration.pas           ← Тесты авторизации (INT-001..004, 008)
-├── TestUploadIntegration.pas          ← Тесты загрузки файлов (INT-005..007, 009)
-├── TestSyncIntegration.pas            ← Тесты синхронизации (INT-010, 013..015)
-├── docker-compose.test.yml            ← Docker Compose для тестовой БД
-├── init-test-db.sql                   ← SQL-скрипт инициализации БД
-├── setup-test-env.bat                 ← Скрипт первоначальной настройки
-├── run-integration-tests.bat          ← Скрипт запуска тестов
-├── README.md                          ← Документация (этот файл)
-└── TestData/                          ← Тестовые данные (опционально)
-    └── README.md                      ← Описание тестовых данных
-```
-
----
-
-## 🗄️ Тестовая база данных
-
-### Параметры подключения
-
-| Параметр | Значение |
-|----------|----------|
-| **Хост** | `localhost` |
-| **Порт** | `5433` (отдельный от продакшена) |
-| **База данных** | `audit_test` |
-| **Пользователь** | `test_user` |
-| **Пароль** | `test_password` |
-
-### Таблицы
-
-- `users_test` — тестовые пользователи
-- `user_sessions_test` — тестовые сессии
-- `audit_logs_test` — тестовые журналы аудита
-- `audit_files_test` — тестовые файлы
-
-### Вспомогательные функции
-
-- `cleanup_test_data()` — очистка всех тестовых данных
-- `create_test_session(user_id, expires_in)` — создание валидной сессии
-- `create_expired_test_session(user_id, expired_ago)` — создание просроченной сессии
-
-### Представления
-
-- `v_test_stats` — статистика тестовых данных
-
----
-
-## 🔧 Управление тестовой БД
-
-### Запуск
-```bash
-docker-compose -f docker-compose.test.yml up -d
-```
-
-### Остановка
-```bash
-docker-compose -f docker-compose.test.yml down
-```
-
-### Перезапуск
-```bash
-docker-compose -f docker-compose.test.yml restart
-```
-
-### Полное удаление (с данными)
-```bash
-docker-compose -f docker-compose.test.yml down -v
-```
-
-### Просмотр логов
-```bash
-docker-compose -f docker-compose.test.yml logs -f
-```
-
-### Подключение к БД через psql
-```bash
-docker exec -it audit-test-db psql -U test_user -d audit_test
-```
-
-### Ручная очистка данных
 ```sql
-SELECT cleanup_test_data();
+INSERT INTO users (username, password_hash, is_active)
+VALUES (
+    'test_user',
+    crypt('test_password', gen_salt('bf', 12)),
+    TRUE
+);
 ```
 
----
+### Тестовые данные (test_user / test_password)
 
-## 📊 Результаты тестов
+- **Username:** `test_user`
+- **Password:** `test_password`
+- **ID:** Определяется автоматически (`GENERATED ALWAYS AS IDENTITY`), получается через `GetTestUserID()`
 
-После запуска тестов создаётся файл `integration-test-results.xml` в формате NUnit XML.
+### Изоляция тестов
 
-### Пример вывода
-```
-========================================
-  Integration Tests for Audit Server
-========================================
+- Каждый тест выполняет `CleanupTestData` в `TearDown`
+- Docker-контейнер использует отдельную БД `audit_test` на порту **5433**
+- Сервер запускается с `/test` для изоляции настроек
 
-Требования:
-1. Docker Desktop запущен
-2. Тестовая БД запущена: docker-compose -f docker-compose.test.yml up -d
-3. DataSnap Server запущен на http://localhost:8082
+### Поддержка DataSnap REST
 
-Запуск тестов...
+Тесты учитывают особенность DataSnap REST: методы возвращают `string`, который оборачивается в `{"result": [...]}`. Парсинг ответа учитывает двойную обёртку JSON.
 
-[TTestLoginIntegration]
-  [PASS] TestLogin_ValidCredentials_ReturnsToken
-  [PASS] TestLogin_InvalidPassword_Returns401
-  [PASS] TestValidToken_AccessProtectedEndpoint_Returns200
-  [PASS] TestInvalidToken_AccessProtectedEndpoint_Returns401
-  [PASS] TestExpiredToken_AccessProtectedEndpoint_Returns401
-  [PASS] TestSession_MultipleTokens_SameUser
-  [PASS] TestSession_CleanupTestData_RemovesSessions
+### Параметризация через переменные окружения
 
-[TTestUploadIntegration]
-  [PASS] TestUpload_ValidJpeg_CreatesFileAndRecords
-  [PASS] TestUpload_NonJpegFile_Returns400
-  [PASS] TestUpload_TooLargeFile_Returns413
-  [PASS] TestUpload_InvalidBase64_NoRecordsCreated
-  [PASS] TestUpload_DifferentUserID_MatchesToken
-  [PASS] TestUpload_InvalidCoordinates_Returns400
+Копируйте `.env.example` в `.env` и настройте параметры подключения:
 
-[TTestSyncIntegration]
-  [PASS] TestBatchSync_MultipleRecords_AllCreated
-  [PASS] TestSync_InvalidCoordinates_Returns400
-  [PASS] TestSync_EmptyArray_Returns200NoRecords
-  [PASS] TestUpload_SameFileTwice_CreatesTwoRecords
-
-Total tests: 17
-Passed:      17 ✅
-Failed:      0
-Time:        ~7.0s
-```
-
----
-
-## ⚠️ Важные замечания
-
-### 1. Изоляция тестов
-- Каждый тест выполняется в изолированной среде
-- Перед каждым тестом вызывается `cleanup_test_data()`
-- После каждого теста данные очищаются
-- Тесты не влияют друг на друга
-
-### 2. Требования к серверу
-- DataSnap Server должен быть запущен **с параметром `/test`**
-- Сервер должен использовать файл `db_settings_test.xml` с настройками тестовой БД
-- Endpoint `/upload` должен быть доступен
-- Endpoint `/datasnap/rest/TServerMethods1/updateSyncUpload` должен быть доступен
-
-**Запуск сервера в тестовом режиме:**
 ```bash
-# Первоначальная настройка (один раз)
-setup-test-env.bat
-
-# Последующие запуски
-start "" "..\Win32\Debug\AuditServer.exe" /test
-
-# Или используйте автоматический запуск тестов
-run-integration-tests.bat
+cp .env.example .env
+# Отредактируйте .env в текстовом редакторе
 ```
 
-### 3. Файловая система
-- Тесты создают файлы в `C:\AuditFiles\YYYY\MM\DD\`
-- После тестов файлы удаляются автоматически
-- Если тест упал, файлы могут остаться — удалите их вручную
+## 🔧 Диагностика
 
-### 4. Сетевые требования
-- Тесты используют HTTP (не HTTPS) для простоты
-- Порт `8082` должен быть доступен
-- Порт `5433` должен быть доступен для Docker
-
----
-
-## 🐛 Отладка
-
-### Ошибка: "Не удалось подключиться к тестовой БД"
-
-**Причины:**
-1. Docker Desktop не запущен
-2. Тестовая БД не запущена
-3. Порт `5433` занят другим приложением
-
-**Решение:**
-```bash
-# Проверьте Docker
-docker ps
-
-# Запустите тестовую БД
-docker-compose -f docker-compose.test.yml up -d
-
-# Проверьте статус
-docker-compose -f docker-compose.test.yml ps
-
-# Проверьте порт
-netstat -ano | findstr :5433
-```
-
-### Ошибка: "Expected [200] but got [401]"
-
-**Причина:** Сервер не настроен на работу с тестовой БД
-
-**Решение:**
-```bash
-# Запустите первоначальную настройку
-setup-test-env.bat
-
-# Или запустите сервер с параметром /test
-start "" "..\Win32\Debug\AuditServer.exe" /test
-
-# Настройте подключение к тестовой БД через UI:
-#   Хост: localhost
-#   Порт: 5433
-#   БД: audit_test
-#   Пользователь: test_user
-#   Пароль: test_password
-```
-
-### Ошибка: "Login endpoint not configured for test database"
-
-**Причина:** Сервер использует `pg_user` вместо `users_test`
-
-**Решение:**
+### Тесты не проходят: "Connection refused"
 - Убедитесь, что сервер запущен с параметром `/test`
-- Проверьте, что файл `db_settings_test.xml` существует в папке `Win32\Debug\`
+- Проверьте, что сервер слушает порт 8082: `netstat -an | findstr 8082`
 
-### Ошибка: "File should be created on disk"
+### Тесты не проходят: "Docker not running"
+- Запустите Docker Desktop
+- Проверьте: `docker ps`
 
-**Причина:** Сервер и тесты на разных машинах
+### Тесты не проходят: " relation \"events\" does not exist"
+- Выполните `init-test-db.sql` в тестовой БД:
+  ```bash
+  docker compose -f docker-compose.test.yml exec -T db psql -U postgres -d audit_test < init-test-db.sql
+  ```
 
-**Решение:**
-- Убедитесь, что сервер и тесты на одной машине
-- Или измените путь к файлам в `TestBase.pas`
+### Тесты не проходят: "test_user not found"
+- Выполните `init-test-db.sql` для создания тестовых пользователей
+- Проверьте, что расширение `pgcrypto` установлено:
+  ```sql
+  CREATE EXTENSION IF NOT EXISTS pgcrypto;
+  ```
 
----
+## 📝 Changelog
 
-## 📈 Интеграция с CI/CD
-
-### GitHub Actions
-
-```yaml
-name: Integration Tests
-
-on: [push, pull_request]
-
-jobs:
-  test:
-    runs-on: windows-latest
-    
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Start Docker Compose
-      run: |
-        cd DataSnapServer/Tests/Integration
-        docker-compose -f docker-compose.test.yml up -d
-        sleep 10
-    
-    - name: Build Server
-      run: msbuild DataSnapServer.dproj
-    
-    - name: Start Server
-      run: Start-Process -FilePath "Win32\Debug\AuditServer.exe"
-    
-    - name: Build Tests
-      run: msbuild IntegrationTests.dproj
-    
-    - name: Run Tests
-      run: |
-        cd DataSnapServer/Tests/Integration/Win32/Debug
-        .\IntegrationTests.exe
-    
-    - name: Upload Results
-      uses: actions/upload-artifact@v3
-      with:
-        name: test-results
-        path: DataSnapServer/Tests/Integration/Win32/Debug/integration-test-results.xml
-```
-
-### Jenkins
-
-```groovy
-pipeline {
-    agent any
-    
-    stages {
-        stage('Start Test DB') {
-            steps {
-                bat 'cd DataSnapServer\\Tests\\Integration && docker-compose -f docker-compose.test.yml up -d'
-                bat 'timeout /t 10'
-            }
-        }
-        
-        stage('Build Server') {
-            steps {
-                bat 'msbuild DataSnapServer.dproj'
-            }
-        }
-        
-        stage('Start Server') {
-            steps {
-                bat 'start Win32\\Debug\\AuditServer.exe'
-                bat 'timeout /t 5'
-            }
-        }
-        
-        stage('Run Tests') {
-            steps {
-                bat 'cd DataSnapServer\\Tests\\Integration\\Win32\\Debug && IntegrationTests.exe'
-            }
-            post {
-                always {
-                    nunit testResultsPattern: 'DataSnapServer/Tests/Integration/Win32/Debug/integration-test-results.xml'
-                }
-            }
-        }
-    }
-    
-    post {
-        always {
-            bat 'cd DataSnapServer\\Tests\\Integration && docker-compose -f docker-compose.test.yml down'
-        }
-    }
-}
-```
-
----
-
-## 📝 История изменений
-
-| Дата | Версия | Описание |
-|------|--------|----------|
-| 2026-06-22 | 1.2 | Добавлена валидация координат, user_id из токена, 17 тестов (INT-011, INT-012) |
+| Дата | Версия | Изменения |
+|------|--------|-----------|
+| 2026-06-22 | 1.2 | Миграция на bcrypt (pgcrypto), собственная таблица users, 17 тестов, валидация координат |
 | 2026-06-22 | 1.1 | Добавлена поддержка параметра `/test` для сервера, скрипты автоматизации |
 | 2026-06-21 | 1.0 | Начальная версия: 13 интеграционных тестов |
 
 ---
 
-## 🔮 Планы развития
-
-- [x] Добавить тесты для параллельных запросов (INT-011) — добавлен TestSession_MultipleTokens_SameUser
-- [x] Добавить тесты для очистки сессий (INT-012) — добавлен TestSession_CleanupTestData_RemovesSessions
-- [ ] Интеграция с CI/CD (GitHub Actions, Jenkins)
-- [ ] Нагрузочное тестирование через JMeter/k6
-- [ ] Тесты для HTTPS (через Nginx)
-- [ ] Тесты для реальных пользователей PostgreSQL
-
----
-
-## 📚 Дополнительные ресурсы
-
-- [DUnitX Documentation](https://github.com/VSoftTechnologies/DUnitX)
-- [Docker Compose Documentation](https://docs.docker.com/compose/)
-- [PostgreSQL Docker Hub](https://hub.docker.com/_/postgres)
-- [NUnit XML Format](https://docs.nunit.org/articles/nunit/overview.html)
-
----
-
-**Версия:** 1.2  
-**Дата:** 2026-06-22  
+**Версия:** 1.2
+**Дата:** 2026-06-22
 **Статус:** ✅ Готово к использованию

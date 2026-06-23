@@ -4,7 +4,7 @@ interface
 
 uses
   DUnitX.TestFramework, TestBase, System.JSON, FireDAC.DApt, FireDAC.Comp.Client,
-  System.Generics.Collections;
+  FireDAC.Stan.Param, System.Generics.Collections;
 
 type
   /// <summary>
@@ -15,9 +15,9 @@ type
   public
     /// <summary>INT-001: Полный цикл авторизации</summary>
     /// <remarks>
-    /// Сервер использует pg_user для Login, поэтому этот тест проверяет
-    /// только то, что endpoint существует и возвращает корректный формат ответа.
-    /// Реальная проверка логина/пароля требует пользователя PostgreSQL.
+    /// Сервер использует собственную таблицу users с bcrypt (pgcrypto) для Login.
+    /// Тестовый пользователь test_user/test_password создан в init-test-db.sql.
+    /// </remarks>
     /// </remarks>
     [Test]
     procedure TestLogin_ValidCredentials_ReturnsToken;
@@ -57,35 +57,38 @@ uses
 procedure TTestLoginIntegration.TestLogin_ValidCredentials_ReturnsToken;
 var
   Response: IHTTPResponse;
-  JSONPayload: string;
   JSONResp: TJSONObject;
+  JSONPayload: string;
   StatusStr: string;
+  Token: string;
 begin
-  // 🔑 Сервер использует pg_user для Login, а не таблицу users.
-  // Поэтому мы не можем создать тестового пользователя через INSERT INTO users.
-  // Вместо этого проверяем, что endpoint существует и возвращает корректный JSON.
-  
-  // Act: пытаемся залогиниться с заведомо несуществующим пользователем
-  JSONPayload := '{"username": "nonexistent_user_xyz", "password": "test_password"}';
+  // 🔑 ИСПРАВЛЕНИЕ: Используем тестового пользователя из таблицы users (bcrypt)
+  // test_user / test_password создан в init-test-db.sql через pgcrypto
+
+  // Act: логин с валидными credentials (POST с JSON body — DataSnap REST ожидает параметры в JSON)
+  JSONPayload := '{"AUsername":"test_user","APassword":"test_password"}';
   Response := PostToServer('/datasnap/rest/TServerMethods1/Login', JSONPayload, False);
-  
-  // Assert: проверяем, что endpoint существует и возвращает JSON
-  // Ожидаем либо 200 (если пользователь существует), либо ошибку в JSON
-  Assert.IsTrue((Response.StatusCode = 200) or (Response.StatusCode = 401) or (Response.StatusCode = 500),
-    'Login endpoint should exist and return HTTP response');
-  
-  // Проверяем, что ответ — валидный JSON
+
+  // Assert: должен вернуться 200 и токен
+  Assert.AreEqual(200, Response.StatusCode,
+    Format('Valid login should return HTTP 200. Response: %s', [Response.ContentAsString]));
+
   JSONResp := TJSONObject.ParseJSONValue(Response.ContentAsString) as TJSONObject;
   try
     Assert.IsNotNull(JSONResp, 'Response should be valid JSON');
-    
-    // Проверяем, что есть поле "status"
-    if JSONResp.GetValue('status') <> nil then
-    begin
-      StatusStr := JSONResp.GetValue('status').Value;
-      Assert.IsTrue((StatusStr = 'success') or (StatusStr = 'error'),
-        'Status should be "success" or "error"');
-    end;
+
+    // DataSnap REST оборачивает в {"result": [...]}
+    var ResultArr := JSONResp.GetValue('result') as TJSONArray;
+    Assert.IsNotNull(ResultArr, 'DataSnap should return result array');
+    Assert.AreEqual(1, ResultArr.Count, 'Result array should have one element');
+
+    // 🔑 Login возвращает TJSONObject (не string), поэтому DataSnap оборачивает его в TJSONObject
+    var InnerObj := ResultArr.Items[0] as TJSONObject;
+    Assert.IsNotNull(InnerObj, 'Inner response should be valid JSON');
+    StatusStr := InnerObj.GetValue('status').Value;
+    Assert.AreEqual('success', StatusStr, 'Status should be success');
+    Token := InnerObj.GetValue('token').Value;
+    Assert.IsTrue(Token <> '', 'Token should not be empty');
   finally
     JSONResp.Free;
   end;
@@ -94,36 +97,48 @@ end;
 procedure TTestLoginIntegration.TestLogin_InvalidPassword_Returns401;
 var
   Response: IHTTPResponse;
-  JSONPayload: string;
   InitialSessionCount: Integer;
+  JSONPayload: string;
   FinalSessionCount: Integer;
 begin
   // Arrange: запоминаем количество сессий до теста
   InitialSessionCount := GetTableCount('user_sessions');
-  
-  // Act: пытаемся залогиниться с неверным паролем
-  JSONPayload := '{"username": "postgres", "password": "wrong_password_xyz"}';
+
+  // Act: пытаемся залогиниться с неверным паролем (POST с JSON body)
+  JSONPayload := '{"AUsername":"test_user","APassword":"wrong_password_xyz"}';
   Response := PostToServer('/datasnap/rest/TServerMethods1/Login', JSONPayload, False);
-  
-  // Assert: сервер должен отклонить запрос (либо 401, либо error в JSON)
-  if Response.StatusCode = 200 then
-  begin
-    // Если вернул 200, проверяем, что в JSON есть "status": "error"
-    var JSONResp := TJSONObject.ParseJSONValue(Response.ContentAsString) as TJSONObject;
-    try
-      if JSONResp.GetValue('status') <> nil then
-      begin
-        Assert.AreEqual('error', JSONResp.GetValue('status').Value,
-          'Invalid credentials should return error status');
-      end;
-    finally
-      JSONResp.Free;
-    end;
+
+  // Assert: DataSnap возвращает 200 даже для ошибок, но в JSON status=error
+  Assert.AreEqual(200, Response.StatusCode,
+    Format('Login endpoint should return HTTP 200 with JSON error. Response: %s', [Response.ContentAsString]));
+
+  var JSONResp := TJSONObject.ParseJSONValue(Response.ContentAsString) as TJSONObject;
+  try
+    Assert.IsNotNull(JSONResp, 'Response should be valid JSON');
+
+    // DataSnap REST оборачивает в {"result": [...]}
+    var ResultArr := JSONResp.GetValue('result') as TJSONArray;
+    Assert.IsNotNull(ResultArr, 'DataSnap should return result array');
+    Assert.AreEqual(1, ResultArr.Count, 'Result array should have one element');
+
+    // 🔑 Login возвращает TJSONObject (не string), поэтому DataSnap оборачивает его в TJSONObject
+    var InnerObj := ResultArr.Items[0] as TJSONObject;
+    Assert.IsNotNull(InnerObj, 'Inner response should be valid JSON');
+    Assert.AreEqual('error', InnerObj.GetValue('status').Value,
+      'Invalid credentials should return error status');
+    
+    // 🔑 Проверяем, что это именно ошибка credentials, а не системная ошибка (pgcrypto)
+    var MsgVal := InnerObj.GetValue('message');
+    if MsgVal <> nil then
+      Assert.AreEqual('Invalid username or password', MsgVal.Value,
+        Format('Should be credentials error, not system error. Full response: %s', [InnerObj.ToString]));
+  finally
+    JSONResp.Free;
   end;
-  
+
   // Проверяем, что сессия НЕ создана в БД
   FinalSessionCount := GetTableCount('user_sessions');
-  Assert.AreEqual(InitialSessionCount, FinalSessionCount, 
+  Assert.AreEqual(InitialSessionCount, FinalSessionCount,
     'No new session should be created for invalid credentials');
 end;
 
@@ -136,8 +151,8 @@ var
   FinalEventCount: Integer;
 begin
   // Arrange: создаём валидную сессию напрямую в БД
-  // 🔑 Используем user_id=1 (предполагаем, что такой пользователь существует в pg_user)
-  Token := CreateTestSession(1, 24); // user_id=1, действительна 24 часа
+  // 🔑 Используем тестового пользователя из таблицы users (bcrypt)
+  Token := CreateTestSession(GetTestUserID, 24); // действительна 24 часа
   AuthToken := Token;
   
   // 🔑 ИСПРАВЛЕНИЕ: updateSyncUpload вставляет в таблицу events, а не audit_logs!
@@ -216,7 +231,7 @@ var
   FinalEventCount: Integer;
 begin
   // Arrange: создаём просроченную сессию напрямую в БД
-  Token := CreateExpiredTestSession(1, 1); // user_id=1, просрочена 1 час назад
+  Token := CreateExpiredTestSession(GetTestUserID, 1); // просрочена 1 час назад
   AuthToken := Token;
   
   InitialEventCount := GetTableCount('events');
@@ -256,8 +271,8 @@ var
   FinalEventCount: Integer;
 begin
   // Arrange: создаём две валидные сессии для одного пользователя
-  Token1 := CreateTestSession(1, 24);
-  Token2 := CreateTestSession(1, 24);
+  Token1 := CreateTestSession(GetTestUserID, 24);
+  Token2 := CreateTestSession(GetTestUserID, 24);
   
   // Сессии должны быть разными
   Assert.AreNotEqual(Token1, Token2, 'Two sessions should have different tokens');
@@ -306,7 +321,7 @@ var
   Qry: TFDQuery;
 begin
   // Arrange: создаём сессию
-  Token := CreateTestSession(1, 24);
+  Token := CreateTestSession(GetTestUserID, 24);
   
   // Проверяем, что сессия создана
   Qry := TFDQuery.Create(nil);

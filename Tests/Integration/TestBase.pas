@@ -1,4 +1,4 @@
-﻿unit TestBase;
+unit TestBase;
 
 interface
 
@@ -46,10 +46,16 @@ type
     procedure CleanupTestData;
     
     /// <summary>Создаёт тестовую сессию в БД и возвращает токен</summary>
-    function CreateTestSession(UserID: Integer; ExpiresInHours: Integer = 24): string;
+    function CreateTestSession(UserID: Int64; ExpiresInHours: Integer = 24): string;
     
     /// <summary>Создаёт просроченную тестовую сессию в БД</summary>
-    function CreateExpiredTestSession(UserID: Integer; ExpiredAgoHours: Integer = 1): string;
+    function CreateExpiredTestSession(UserID: Int64; ExpiredAgoHours: Integer = 1): string;
+    
+    /// <summary>Возвращает ID тестового пользователя (test_user)</summary>
+    function GetTestUserID: Int64;
+    
+    /// <summary>Возвращает ID второго тестового пользователя (test_user_2)</summary>
+    function GetTestUserID2: Int64;
     
     /// <summary>Возвращает количество записей в таблице</summary>
     function GetTableCount(const TableName: string): Integer;
@@ -179,7 +185,10 @@ begin
   // Создаём поток с JSON
   PayloadStream := TStringStream.Create(JSONPayload, TEncoding.UTF8);
   try
+    // 🔑 DataSnap REST ожидает Content-Type: application/json для JSON body
+    FHTTPClient.CustomHeaders['Content-Type'] := 'application/json';
     Result := FHTTPClient.Post(FullURL, PayloadStream, nil, Headers);
+    FHTTPClient.CustomHeaders['Content-Type'] := '';
   finally
     PayloadStream.Free;
   end;
@@ -216,10 +225,8 @@ var
   JSONResp: TJSONObject;
   ResultArr: TJSONArray;
 begin
-  JSONPayload := Format(
-    '{"username": "%s", "password": "%s"}',
-    [Username, Password]
-  );
+  // 🔑 DataSnap REST для примитивных параметров ожидает JSON body в POST
+  JSONPayload := Format('{"AUsername":"%s","APassword":"%s"}', [Username, Password]);
   
   Response := PostToServer('/datasnap/rest/TServerMethods1/Login', JSONPayload, False);
   
@@ -237,7 +244,15 @@ begin
     if not Assigned(ResultArr) or (ResultArr.Count = 0) then
       raise Exception.Create('Login failed: no token in response');
     
-    FAuthToken := ResultArr.Items[0].Value;
+    var InnerObj := ResultArr.Items[0] as TJSONObject;
+    if not Assigned(InnerObj) then
+      raise Exception.Create('Login failed: inner response not JSON');
+    
+    var TokenVal := InnerObj.GetValue('token');
+    if not Assigned(TokenVal) then
+      raise Exception.Create('Login failed: no token field');
+    
+    FAuthToken := TokenVal.Value;
     
     if FAuthToken = '' then
       raise Exception.Create('Login failed: empty token');
@@ -272,7 +287,7 @@ begin
   end;
 end;
 
-function TIntegrationTestBase.CreateTestSession(UserID: Integer; 
+function TIntegrationTestBase.CreateTestSession(UserID: Int64; 
   ExpiresInHours: Integer): string;
 var
   Qry: TFDQuery;
@@ -297,7 +312,7 @@ begin
   end;
 end;
 
-function TIntegrationTestBase.CreateExpiredTestSession(UserID: Integer; 
+function TIntegrationTestBase.CreateExpiredTestSession(UserID: Int64; 
   ExpiredAgoHours: Integer): string;
 var
   Qry: TFDQuery;
@@ -316,6 +331,48 @@ begin
     else
       raise Exception.Create('Failed to create expired test session');
     
+    Qry.Close;
+  finally
+    Qry.Free;
+  end;
+end;
+
+function TIntegrationTestBase.GetTestUserID: Int64;
+var
+  Qry: TFDQuery;
+begin
+  Qry := TFDQuery.Create(nil);
+  try
+    Qry.Connection := FDBConnection;
+    Qry.SQL.Text := 'SELECT id FROM users WHERE username = ''test_user'' AND is_active = TRUE LIMIT 1';
+    Qry.Open;
+
+    if not Qry.IsEmpty then
+      Result := Qry.Fields[0].AsLargeInt
+    else
+      raise Exception.Create('Test user "test_user" not found in database. Run init-test-db.sql first.');
+
+    Qry.Close;
+  finally
+    Qry.Free;
+  end;
+end;
+
+function TIntegrationTestBase.GetTestUserID2: Int64;
+var
+  Qry: TFDQuery;
+begin
+  Qry := TFDQuery.Create(nil);
+  try
+    Qry.Connection := FDBConnection;
+    Qry.SQL.Text := 'SELECT id FROM users WHERE username = ''test_user_2'' AND is_active = TRUE LIMIT 1';
+    Qry.Open;
+
+    if not Qry.IsEmpty then
+      Result := Qry.Fields[0].AsLargeInt
+    else
+      raise Exception.Create('Test user "test_user_2" not found in database. Run init-test-db.sql first.');
+
     Qry.Close;
   finally
     Qry.Free;

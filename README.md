@@ -8,7 +8,7 @@
 
 ### 🔒 Безопасность (Security)
 * **Windows DPAPI:** Пароли от БД и API-ключи хранятся в `db_settings.xml` в зашифрованном виде. Используется флаг `CRYPTPROTECT_LOCAL_MACHINE` — расшифровка возможна только на том же компьютере, где было произведено шифрование (любым пользователем на этой машине).
-* **Сессионная аутентификация:** Вместо статических ключей используется механизм временных токенов (GUID) с ограниченным временем жизни (TTL), хранящихся в таблице `user_sessions`.
+* **Сессионная аутентификация с bcrypt:** Вместо статических ключей используется механизм временных токенов (GUID) с ограниченным временем жизни (TTL). Пароли хранятся в таблице `users` в виде bcrypt-хешей (12 раундов, расширение `pgcrypto` PostgreSQL). Проверка пароля выполняется через `crypt(password, hash) = hash` на уровне БД.
 * **Защита от подмены данных (Privilege Escalation):** Сервер **полностью игнорирует** поле `user_id`, передаваемое клиентом в JSON-теле запроса. Реальный `user_id` извлекается исключительно из валидной сессии и принудительно подставляется в SQL-запрос.
 * **Ограничения размера запроса:** Входящий JSON-пакет ограничен 1 МБ (`MAX_JSON_LENGTH = 1048576`). Массив событий — не более 1000 элементов (`MAX_ARRAY_ITEMS = 1000`). Превышение любого лимита немедленно отклоняется.
 * **Сокрытие внутренних ошибок:** При сбоях БД клиент получает только generic-сообщение (`"Database operation failed"`). Детали ошибки (`E.Message`) записываются только в серверный лог и никогда не передаются наружу.
@@ -32,16 +32,24 @@
 
 ```text
 DataSnapServer/
-└── Source/
-    ├── FormUnitMain.pas          # Главная форма: инициализация FDManager, автоочистка сессий при старте
-    ├── ServerMethodsUnitMain.pas # Бизнес-логика: Login, парсинг JSON, транзакции, SQL-инсерты
-    ├── WebModuleUnitMain.pas     # HTTP-перехватчик: проверка токенов, endpoint /upload, извлечение user_id в threadvar
-    ├── ServerSessionContext.pas  # Объявление threadvar CurrentUserID для безопасной межмодульной передачи
-    ├── ServerSettings.pas        # Конфигурация: чтение/запись XML, генерация API-ключа (RtlGenRandom), вызов WinDPAPIUtils
-    ├── ServerLogger.pas          # Инициализация глобального экземпляра LoggerPro (мин. уровень Info, ротация 15×10 МБ)
-    ├── WinDPAPIUtils.pas         # Обертка над Crypt32.dll (CryptProtectData / CryptUnprotectData, флаг CRYPTPROTECT_LOCAL_MACHINE)
-    ├── UploadUtils.pas           # Утилиты для загрузки фото: проверка JPEG, SHA-256, генерация UUID, атомарное сохранение
-    └── frServerSettings.pas      # UI формы настроек: тест соединения, генерация API-ключа, сброс флага теста при изменении полей
+├── Source/
+│   ├── FormUnitMain.pas          # Главная форма: инициализация FDManager, автоочистка сессий при старте
+│   ├── ServerMethodsUnitMain.pas # Бизнес-логика: Login, парсинг JSON, транзакции, SQL-инсерты
+│   ├── WebModuleUnitMain.pas     # HTTP-перехватчик: проверка токенов, endpoint /upload, извлечение user_id в threadvar
+│   ├── ServerSessionContext.pas  # Объявление threadvar CurrentUserID для безопасной межмодульной передачи
+│   ├── ServerSettings.pas        # Конфигурация: чтение/запись XML, генерация API-ключа (RtlGenRandom), вызов WinDPAPIUtils
+│   ├── ServerLogger.pas          # Инициализация глобального экземпляра LoggerPro (мин. уровень Info, ротация 15×10 МБ)
+│   ├── WinDPAPIUtils.pas         # Обертка над Crypt32.dll (CryptProtectData / CryptUnprotectData, флаг CRYPTPROTECT_LOCAL_MACHINE)
+│   ├── UploadUtils.pas           # Утилиты для загрузки фото: проверка JPEG, SHA-256, генерация UUID, атомарное сохранение
+│   └── frServerSettings.pas      # UI формы настроек: тест соединения, генерация API-ключа, сброс флага теста при изменении полей
+├── migrations/
+│   ├── 001_security_users.sql    # Миграция БД: расширение таблицы users, создание таблиц безопасности
+│   └── README.md                 # Документация по миграциям
+└── SQL/
+    ├── table_events.sql          # Создание таблицы events
+    ├── table_user_sessions.sql   # Создание таблицы user_sessions
+    ├── table_audit_logs.sql      # Создание таблицы audit_logs
+    └── table_audit_files.sql     # Создание таблицы audit_files
 ```
 
 ---
@@ -58,18 +66,46 @@ DataSnapServer/
 
 ## 🗄️ Настройка базы данных (PostgreSQL)
 
+### Миграция существующей базы данных
+
+Если у вас уже есть база данных с таблицей `users` (например, из проекта Postgre_Delphi), используйте файл миграции:
+
+```bash
+# Применить миграцию к существующей БД
+psql -U postgres -d your_database -f migrations/001_security_users.sql
+```
+
+Миграция `001_security_users.sql`:
+- ✅ Создаёт таблицу `users`, если её нет (с полями из Postgre_Delphi)
+- ✅ Расширяет существующую таблицу `users` полями безопасности (`password_hash`, `is_active`, `role`, etc.)
+- ✅ Создаёт вспомогательные таблицы (`user_sessions`, `security_events`, `rate_limits`)
+- ✅ Идемпотентна — можно запускать многократно без ошибок
+
+### Новая установка
+
 Перед запуском сервера выполните следующий SQL-скрипт в вашей базе данных для создания необходимых таблиц и индексов:
 
 ```sql
--- 1. Аутентификация использует встроенные учётные записи PostgreSQL (pg_user).
---    Отдельная таблица users НЕ требуется: Login подключается к БД от имени
---    указанного пользователя и извлекает usesysid из системного каталога.
---    В дальнейшем рекомендуется создать собственную таблицу с хэшированием паролей (bcrypt/Argon2).
+-- 1. 🔑 Расширение pgcrypto для bcrypt
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- 2. Таблица активных сессий
+-- 2. Таблица пользователей (аутентификация через bcrypt, не pg_user)
+CREATE TABLE IF NOT EXISTS users (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    username    TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    is_active   BOOLEAN DEFAULT TRUE,
+    created_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active) WHERE is_active = TRUE;
+
+-- 3. Таблица активных сессий
 CREATE TABLE IF NOT EXISTS user_sessions (
-    session_id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL,  -- ID из pg_user.usesysid
+    session_id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id),
     session_token VARCHAR(255) UNIQUE NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP NOT NULL
@@ -82,8 +118,8 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user ON user_sessions(user_id);
 
 -- 3. Таблица событий (для batch-синхронизации через SyncUpload)
 CREATE TABLE IF NOT EXISTS events (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL,
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id),
     event_type VARCHAR(50) NOT NULL,
     occurred_at TIMESTAMP NOT NULL,
     metadata JSONB,
@@ -95,8 +131,8 @@ CREATE INDEX IF NOT EXISTS idx_events_occurred ON events(occurred_at);
 
 -- 4. Таблица журналов аудита (для endpoint /upload)
 CREATE TABLE IF NOT EXISTS audit_logs (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL,
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id),
     event_type VARCHAR(50) NOT NULL,
     occurred_at TIMESTAMP NOT NULL,
     location point,  -- PostgreSQL native point type: (lon, lat)
@@ -109,8 +145,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_occurred ON audit_logs(occurred_at);
 
 -- 5. Таблица файлов аудита (связь с audit_logs)
 CREATE TABLE IF NOT EXISTS audit_files (
-    id SERIAL PRIMARY KEY,
-    log_id INTEGER REFERENCES audit_logs(id) ON DELETE CASCADE,
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    log_id BIGINT REFERENCES audit_logs(id) ON DELETE CASCADE,
     file_uuid UUID NOT NULL,
     storage_path VARCHAR(500) NOT NULL,
     original_filename VARCHAR(255),
@@ -126,6 +162,22 @@ CREATE INDEX IF NOT EXISTS idx_audit_files_uuid ON audit_files(file_uuid);
 -- 6. Очистка просроченных сессий (выполняется при старте сервера)
 DELETE FROM user_sessions WHERE expires_at < CURRENT_TIMESTAMP;
 ```
+
+### Миграция пользователей с plain-text паролями
+
+Если у вас есть пользователи с паролями в открытом виде (например, из старой системы), выполните миграцию:
+
+```sql
+-- Обновить пароли на bcrypt-хеши
+UPDATE users 
+SET password_hash = crypt(password, gen_salt('bf', 12))
+WHERE password_hash IS NULL OR password_hash = '';
+
+-- Удалить колонку с открытыми паролями (опционально)
+-- ALTER TABLE users DROP COLUMN password;
+```
+
+**Fallback на plain text:** Если `password_hash` пустой, сервер временно принимает пароль в открытом виде (для обратной совместимости). Рекомендуется заполнить `password_hash` для всех пользователей.
 
 ---
 
@@ -225,7 +277,8 @@ GET /datasnap/rest/TServerMethods1/Login/{username}/{password}
 ```json
 {
   "status": "success",
-  "token": "{86AB48DA-D896-4480-8BA8-99E620F05C5E}"
+  "token": "{86AB48DA-D896-4480-8BA8-99E620F05C5E}",
+  "user_id": 1
 }
 ```
 
@@ -280,12 +333,25 @@ POST /datasnap/rest/TServerMethods1/updateSyncUpload
 }
 ```
 
+**Response (внутренняя ошибка в JSON, HTTP 200):**
+*DataSnap REST оборачивает возвращаемый string в `{"result": [...]}`. При ошибке внутри метода (например, невалидные координаты) HTTP-статус остаётся 200, но JSON содержит:*
+```json
+{
+  "result": ["{\"result\":\"error\",\"message\":\"Invalid latitude in item 0: must be between -90 and 90\"}"]
+}
+```
+
 **Response (401 Unauthorized):**
 ```json
 {
   "error": "Unauthorized: session expired or invalid"
 }
 ```
+
+**Валидация:**
+- `lat` внутри `details` должно быть в диапазоне **-90..90**
+- `lon` внутри `details` должно быть в диапазоне **-180..180**
+- При невалидных координатах вся транзакция откатывается, записи не создаются
 
 ---
 
@@ -327,6 +393,11 @@ POST /upload
   "url": "https://192.168.1.113/audit-files/2026/6/19/a1b2c3d4-e5f6-7890-abcd-ef1234567890.jpg"
 }
 ```
+
+**Валидация:**
+- `lat` должно быть в диапазоне **-90..90**
+- `lon` должно быть в диапазоне **-180..180**
+- При невалидных координатах возвращается **HTTP 400**, записи не создаются
 
 **Особенности реализации:**
 - Фото передаётся в Base64 внутри JSON (избегает проблем с multipart/кодировками)
@@ -404,7 +475,34 @@ cd DataSnapServer\Tests\Integration\Win32\Debug
 IntegrationTests.exe
 ```
 
-**Важно:** Параметр `/test` заставляет сервер читать настройки из файла `db_settings_test.xml` вместо `db_settings.xml`. Это позволяет серверу работать с тестовой БД (порт 5433) независимо от продакшен-настроек.
+**Как работает параметр `/test`:**
+
+Параметр `/test` заставляет сервер читать настройки из файла `db_settings_test.xml` вместо `db_settings.xml`. Это позволяет серверу работать с тестовой БД (порт 5433) независимо от продакшен-настроек.
+
+**Реализация в коде:**
+```pascal
+// ServerSettings.pas
+if FindCmdLineSwitch('test', ['-', '/'], True) then
+  SettingsFile := TPath.Combine(TPath.GetDirectoryName(ParamStr(0)), 'db_settings_test.xml')
+else
+  SettingsFile := TPath.Combine(TPath.GetDirectoryName(ParamStr(0)), 'db_settings.xml');
+```
+
+**Тестовые пользователи:**
+
+В тестовой БД автоматически создаются два пользователя (через `init-test-db.sql`):
+
+| Username | Password | Роль | ID |
+|----------|----------|------|:--:|
+| `test_user` | `test_password` | user | 1 |
+| `test_user_2` | `test_password` | user | 2 |
+
+Пароли хранятся в виде bcrypt-хешей (12 раундов через `pgcrypto`). Тест `TestUpload_DifferentUserID_MatchesToken` использует `test_user_2` для проверки, что `user_id` извлекается из токена, а не хардкодится.
+
+**Проверка тестовых пользователей:**
+```bash
+docker exec -it audit-test-db psql -U test_user -d audit_test -c "SELECT id, username, role, is_active FROM users;"
+```
 
 Подробная документация по тестированию доступна в:
 - [Tests/README.md](Tests/README.md) — модульные тесты
@@ -414,12 +512,12 @@ IntegrationTests.exe
 
 ## 🔮 Roadmap (Планы развития)
 
-- [ ] Создание собственной таблицы `users` с криптографическим хешированием паролей (bcrypt или Argon2) взамен аутентификации через `pg_user`.
+- [x] ~~Создание собственной таблицы `users` с криптографическим хешированием паролей (bcrypt) взамен аутентификации через `pg_user`~~ ✅ **Реализовано** (pgcrypto, 12 раундов, fallback на plain text)
 - [ ] Настройка фоновой задачи `pg_cron` в PostgreSQL для регулярной очистки просроченных сессий (в дополнение к очистке при старте сервера).
 - [ ] Расширенный алертинг: отправка уведомлений о критических ошибках (Fatal) в Telegram или по электронной почте через дополнительные аппендеры LoggerPro.
 - [ ] Мониторинг производительности: интеграция с Prometheus/Grafana для отслеживания метрик (количество запросов, время отклика, размер пула соединений).
 - [ ] Rate limiting: защита от DDoS-атак через ограничение количества запросов с одного IP (через Nginx или встроенный механизм).
-- [x] ~~Интеграционные тесты с реальной БД PostgreSQL (через Docker-контейнер)~~ ✅ **Реализовано** (13 тестов, Docker Compose, 100% прохождение)
+- [x] ~~Интеграционные тесты с реальной БД PostgreSQL (через Docker-контейнер)~~ ✅ **Реализовано** (17 тестов, Docker Compose, 100% прохождение)
 - [x] ~~Загрузка файлов (фотографий) через Base64 в JSON~~ ✅ **Реализовано** (endpoint `/upload`)
 - [x] ~~Подключение тестов `TestUploadUtils.pas` и `TestUploadPayloadParser.pas` к `TestRunner.dpr`~~ ✅ **Выполнено** (42 теста, 100% прохождение)
 

@@ -56,8 +56,12 @@ var
 
 function TServerSettings.ApplyToConn(var AConn: TFDConnection): boolean;
 begin
+  Assert(Assigned(AConn), 'not Assigned(AConn)');
   Result := true;
   try
+    if AConn.Connected then
+      AConn.Connected := false;
+    AConn.Params.Clear;
     AConn.Params.DriverID := 'PG';
     AConn.Params.Values['Server'] := Host;
     AConn.Params.Values['Port'] := IntToStr(Port);

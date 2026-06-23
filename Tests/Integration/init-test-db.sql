@@ -1,66 +1,103 @@
-﻿-- ============================================================
+-- ============================================================
 -- Скрипт инициализации тестовой базы данных
 -- Структура ДОЛЖНА ТОЧНО СООТВЕТСТВОВАТЬ тому, что использует сервер.
 -- Сервер использует следующие таблицы:
+--   - users (аутентификация с bcrypt)
 --   - events (для updateSyncUpload через qryInsert)
 --   - audit_logs (для /upload через WebModuleUploadAction)
 --   - audit_files (для /upload через WebModuleUploadAction)
 --   - user_sessions (для Login и проверки токена)
---   - pg_user (системная таблица PostgreSQL, для Login)
 -- ============================================================
 
+-- 🔑 Расширение pgcrypto для bcrypt
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- 🔑 Таблица пользователей (аутентификация через bcrypt, не pg_user)
+CREATE TABLE IF NOT EXISTS users (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    username    TEXT NOT NULL UNIQUE,
+    created_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE users 
+  ADD COLUMN IF NOT EXISTS password_hash TEXT,
+  ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE,
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
+  
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active) WHERE is_active = TRUE;
+
+-- Триггер обновления updated_at
+CREATE OR REPLACE FUNCTION trigger_set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS tr_users_updated_at ON users;
+CREATE TRIGGER tr_users_updated_at
+    BEFORE UPDATE ON users
+    FOR EACH ROW
+    EXECUTE FUNCTION trigger_set_updated_at();
+
+-- Тестовый пользователь (password = 'test_password')
+-- Используем plain text для тестов — сервер Login имеет fallback
+INSERT INTO users (username, password_hash, is_active)
+VALUES ('test_user', 'test_password', TRUE)
+ON CONFLICT (username) DO UPDATE SET
+    password_hash = 'test_password',
+    is_active = TRUE;
+
+-- Второй тестовый пользователь (для тестов с user_id=2)
+INSERT INTO users (username, password_hash, is_active)
+VALUES ('test_user_2', 'test_password', TRUE)
+ON CONFLICT (username) DO UPDATE SET
+    password_hash = 'test_password',
+    is_active = TRUE;
+
 -- 🔑 Таблица событий (используется updateSyncUpload через qryInsert)
--- SQL: INSERT INTO events (user_id, event_type, occurred_at, metadata)
---      VALUES (:uid, :etype, :otime, :meta::jsonb)
 CREATE TABLE IF NOT EXISTS events (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    event_type VARCHAR(50) NOT NULL,
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id),
+    event_type  VARCHAR(50) NOT NULL,
     occurred_at TIMESTAMP NOT NULL,
-    metadata JSONB,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    metadata    JSONB,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 🔑 Таблица журналов аудита (используется /upload через WebModuleUploadAction)
--- SQL: INSERT INTO audit_logs (user_id, event_type, occurred_at, location, details, created_at)
---      VALUES (:user_id, :event_type, :occurred_at, point(:lon, :lat), :details, NOW())
---      RETURNING id
 CREATE TABLE IF NOT EXISTS audit_logs (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    event_type VARCHAR(50) NOT NULL,
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id),
+    event_type  VARCHAR(50) NOT NULL,
     occurred_at TIMESTAMP NOT NULL,
-    location point,
-    details JSONB,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    location    point,
+    details     JSONB,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 🔑 Таблица файлов аудита (используется /upload через WebModuleUploadAction)
--- SQL: INSERT INTO audit_files (log_id, file_uuid, storage_path, original_filename, file_size, checksum_sha256, mime_type)
---      VALUES (:log_id, :uuid::uuid, :path, :orig, :size, :sha, :mime)
 CREATE TABLE IF NOT EXISTS audit_files (
-    id SERIAL PRIMARY KEY,
-    log_id INTEGER REFERENCES audit_logs(id),
-    file_uuid UUID NOT NULL,
-    storage_path VARCHAR(500) NOT NULL,
-    original_filename VARCHAR(255),
-    file_size BIGINT NOT NULL,
-    checksum_sha256 VARCHAR(64) NOT NULL,
-    mime_type VARCHAR(100),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    log_id              BIGINT REFERENCES audit_logs(id) ON DELETE CASCADE,
+    file_uuid           UUID NOT NULL,
+    storage_path        VARCHAR(500) NOT NULL,
+    original_filename   VARCHAR(255),
+    file_size           BIGINT NOT NULL,
+    checksum_sha256     VARCHAR(64) NOT NULL,
+    mime_type           VARCHAR(100),
+    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 🔑 Таблица сессий (используется Login и WebModuleBeforeDispatch)
--- SQL: INSERT INTO user_sessions (user_id, session_token, expires_at)
---      VALUES (:uid, :token, :exp)
--- SQL: SELECT user_id FROM user_sessions
---      WHERE session_token = :token AND expires_at > CURRENT_TIMESTAMP
 CREATE TABLE IF NOT EXISTS user_sessions (
-    session_id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    session_token VARCHAR(255) UNIQUE NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP NOT NULL
+    session_id      BIGSERIAL PRIMARY KEY,
+    user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    session_token   VARCHAR(255) UNIQUE NOT NULL,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at      TIMESTAMP NOT NULL
 );
 
 -- ============================================================
@@ -81,7 +118,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_files_uuid ON audit_files(file_uuid);
 -- Вспомогательные функции для тестов
 -- ============================================================
 
--- Очистка тестовых данных
+-- Очистка тестовых данных (кроме users — пользователь нужен для логина)
 CREATE OR REPLACE FUNCTION cleanup_test_data() RETURNS void AS $$
 BEGIN
     DELETE FROM audit_files;
@@ -93,7 +130,7 @@ $$ LANGUAGE plpgsql;
 
 -- Создание валидной сессии (принимает INTERVAL)
 CREATE OR REPLACE FUNCTION create_test_session(
-    p_user_id INTEGER,
+    p_user_id BIGINT,
     p_expires_in INTERVAL DEFAULT INTERVAL '24 hours'
 ) RETURNS VARCHAR AS $$
 DECLARE
@@ -108,7 +145,7 @@ $$ LANGUAGE plpgsql;
 
 -- 🔑 Создание просроченной сессии (INTERVAL — для совместимости с тестами)
 CREATE OR REPLACE FUNCTION create_expired_test_session(
-    p_user_id INTEGER,
+    p_user_id BIGINT,
     p_expired_interval INTERVAL DEFAULT INTERVAL '1 hour'
 ) RETURNS VARCHAR AS $$
 DECLARE
@@ -126,7 +163,9 @@ $$ LANGUAGE plpgsql;
 -- ============================================================
 
 CREATE OR REPLACE VIEW v_test_stats AS
-SELECT 'events' as table_name, COUNT(*) as row_count FROM events
+SELECT 'users' as table_name, COUNT(*) as row_count FROM users
+UNION ALL
+SELECT 'events', COUNT(*) FROM events
 UNION ALL
 SELECT 'user_sessions', COUNT(*) FROM user_sessions
 UNION ALL
@@ -142,5 +181,5 @@ DO $$
 BEGIN
     RAISE NOTICE '✅ Тестовая база данных успешно инициализирована';
     RAISE NOTICE '📊 Структура таблиц соответствует серверному коду';
-    RAISE NOTICE '📊 Таблицы: events, audit_logs, audit_files, user_sessions';
+    RAISE NOTICE '📊 Таблицы: users, events, audit_logs, audit_files, user_sessions';
 END $$;

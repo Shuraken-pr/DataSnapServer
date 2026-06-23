@@ -76,7 +76,7 @@ begin
     end;
 
     WriteLn;
-    WriteLn('Результаты сохранены в: integration-test-results.xml');
+    WriteLn('Результаты сохранены в: dunitx-results.xml');
     WriteLn('Press Enter to exit...');
     ReadLn;
   except

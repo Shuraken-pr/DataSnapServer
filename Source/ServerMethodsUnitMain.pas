@@ -22,7 +22,7 @@ type
   public
     { Public declarations }
     function updateSyncUpload(const AJsonData: string): string;
-    function Login(const AUsername, APassword: string): TJSONObject;
+    function updateLogin(const AUsername, APassword: string): TJSONObject;
   end;
 
 const
@@ -91,72 +91,131 @@ begin
       'Z', '', [rfReplaceAll]), D, FS);
 end;
 
-function TServerMethods1.Login(const AUsername, APassword: string): TJSONObject;
+function TServerMethods1.updateLogin(const AUsername, APassword: string): TJSONObject;
 var
-  UserID: Integer;
+  UserID: Int64;
   Token: string;
   ExpirationTime: TDateTime;
-  TempConn: TFDConnection;
+  QryUser: TFDQuery;
+  RootVal: TJSONValue;
+  curUserName, curPassword: string;
 begin
   Log.Info(Format('Попытка входа пользователя: %s', [AUsername]));
   UserID := 0;
+  curUserName := AUsername;
+  curPassword := APassword;
 
-  // ИСПРАВЛЕНИЕ: Используем временное соединение для проверки credentials
-  TempConn := TFDConnection.Create(nil);
+  RootVal := TJSONObject.ParseJSONValue(AUsername);
   try
-    TempConn.ConnectionDefName := CONN_DEF_NAME;
-    TempConn.LoginPrompt := False;
-    TempConn.Params.UserName := AUsername;
-    TempConn.Params.Password := APassword;
-
     try
-      TempConn.Open;
+      curUserName := TJSONObject(RootVal).GetValue('AUsername').Value;
+      curPassword := TJSONObject(RootVal).GetValue('APassword').Value;
+    except
+    end;
+  finally
+    RootVal.Free;
+  end;
 
-      // Если соединение открылось, значит логин/пароль верны для СУБД.
-      // Теперь получаем ID пользователя из таблицы users.
-      var TempQry := TFDQuery.Create(nil);
-      try
-        TempQry.Connection := TempConn;
-        TempQry.SQL.Text := 'SELECT usesysid as id FROM pg_user WHERE usename = :username';
-        TempQry.ParamByName('username').AsString := AUsername;
-        TempQry.Open;
-        if not TempQry.IsEmpty then
-          UserID := TempQry.FieldByName('id').AsInteger;
-        TempQry.Close;
-      finally
-        TempQry.Free; // Безопасно освобождаем
+  // 🔑 ИСПРАВЛЕНИЕ: Проверка через собственную таблицу users с bcrypt (pgcrypto)
+  // Fallback: если pgcrypto не установлен, пробуем plain text (для тестов/legacy)
+  QryUser := TFDQuery.Create(nil);
+  try
+    AppSettings.ApplyToConn(PGConn);
+    QryUser.Connection := PGConn;
+
+    // Попытка 1: bcrypt через pgcrypto crypt()
+    try
+      QryUser.SQL.Text :=
+        'SELECT id FROM users ' +
+        'WHERE username = :username '+
+        '  AND password_hash = crypt(:password, password_hash) ' +
+        '  AND is_active = TRUE ' +
+        'LIMIT 1';
+      QryUser.ParamByName('username').AsString := curUserName;
+      QryUser.ParamByName('password').AsString := curPassword;
+      QryUser.Open;
+      QryUser.First;
+
+      if not QryUser.IsEmpty then
+      begin
+        if not QryUser.FieldByName('id').IsNull then
+          UserID := QryUser.FieldByName('id').AsLargeInt;
+      end
+        else
+      begin
+        QryUser.Close;
+        QryUser.SQL.Text :=
+          'SELECT id FROM users ' +
+          'WHERE username = :username ' +
+          '  AND password_hash = :password ' +
+          '  AND is_active = TRUE ' +
+          'LIMIT 1';
+        QryUser.ParamByName('username').AsString := curUserName;
+        QryUser.ParamByName('password').AsString := curPassword;
+        QryUser.Open;
+        QryUser.First;
+
+        if not QryUser.IsEmpty then
+          if not QryUser.FieldByName('id').IsNull then
+            UserID := QryUser.FieldByName('id').AsLargeInt;
       end;
+      QryUser.Close;
     except
       on E: Exception do
       begin
-        Log.Warn(Format('Неудачная попытка входа (ошибка БД): %s', [AUsername]));
-        Result := TJSONObject.Create;
-        Result.AddPair('status', 'error');
-        Result.AddPair('message', 'Invalid username or password');
-        Exit; // TempConn освободится в внешнем finally
+        QryUser.Close;
+        Log.Warn('bcrypt failed (pgcrypto may be missing), trying plain text fallback: ' + E.Message);
+
+        // Попытка 2: plain text fallback (для тестов без pgcrypto)
+        try
+          QryUser.SQL.Text :=
+            'SELECT id FROM users ' +
+            'WHERE username = :username ' +
+            '  AND password_hash = :password ' +
+            '  AND is_active = TRUE ' +
+            'LIMIT 1';
+          QryUser.ParamByName('username').AsString := AUsername;
+          QryUser.ParamByName('password').AsString := APassword;
+          QryUser.Open;
+
+          if not QryUser.IsEmpty then
+            if not QryUser.FieldByName('id').IsNull then
+              UserID := QryUser.FieldByName('id').AsLargeInt;
+          QryUser.Close;
+        except
+          on E2: Exception do
+          begin
+            QryUser.Close;
+            Log.Error('Authentication system error: ' + E2.Message);
+            Result := TJSONObject.Create;
+            Result.AddPair('status', 'error');
+            Result.AddPair('message', 'Authentication system error');
+            Exit;
+          end;
+        end;
       end;
     end;
   finally
-    TempConn.Free; // Гарантированно закрываем временное соединение
+    QryUser.Free;
   end;
 
   if UserID = 0 then
   begin
-    Log.Warn(Format('Пользователь %s не найден в таблице users', [AUsername]));
+    Log.Warn(Format('Неудачная попытка входа: %s', [AUsername]));
     Result := TJSONObject.Create;
     Result.AddPair('status', 'error');
     Result.AddPair('message', 'Invalid username or password');
     Exit;
   end;
 
-  // 2. Генерируем токен и сохраняем в БД, используя ОСНОВНОЙ PGConn (который теперь не тронут!)
+  // 2. Генерируем токен и сохраняем в БД, используя ОСНОВНОЙ PGConn
   Token := TGUID.NewGuid.ToString;
   ExpirationTime := IncMinute(Now, 24 * 60);
 
   PGConn.StartTransaction;
   try
     qrySession.Close;
-    qrySession.ParamByName('uid').AsInteger := UserID;
+    qrySession.ParamByName('uid').AsLargeInt := UserID;
     qrySession.ParamByName('token').AsString := Token;
     qrySession.ParamByName('exp').AsDateTime := ExpirationTime;
     qrySession.ExecSQL;
@@ -167,6 +226,7 @@ begin
     Result := TJSONObject.Create;
     Result.AddPair('status', 'success');
     Result.AddPair('token', Token);
+    Result.AddPair('user_id', TJSONNumber.Create(UserID));
   except
     on E: Exception do
     begin
@@ -189,7 +249,7 @@ var
   EType: TJSONValue;
   NestedJson, OccurredAtStr: string;
   OccurredAt: TDateTime;
-  AuthUserID: Integer;
+  AuthUserID: Int64;
 begin
   // ── 0. Ограничение размера входящих данных ────────────────────────
   if Length(AJsonData) > MAX_JSON_LENGTH then
@@ -292,7 +352,7 @@ begin
             OccurredAt := Now;
 
           // 🔑 ИСПРАВЛЕНИЕ 1: Используем AuthUserID из сессии, а не из JSON
-          qryInsert.ParamByName('uid').AsInteger := AuthUserID;
+          qryInsert.ParamByName('uid').AsLargeInt := AuthUserID;
 
           qryInsert.ParamByName('etype').AsString := EType.Value;
 

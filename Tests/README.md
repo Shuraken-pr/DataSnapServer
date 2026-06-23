@@ -107,6 +107,7 @@ Time:        3.200s
 
 | Дата | Описание |
 |------|----------|
+| 2026-06-22 | Обновлена схема тестовой БД: добавлены поля безопасности (`password_hash`, `is_active`, `role`, `last_login_at`, `failed_login_attempts`, `locked_until`), расширение `pgcrypto` для bcrypt |
 | 2026-06-21 | Подключены и успешно запущены `TestUploadUtils.pas` (18 тестов) и `TestUploadPayloadParser.pas` (6 тестов). Итого 42 теста, 100% прохождение |
 | 2026-06-19 | Подключены `TestUploadUtils.pas` и `TestUploadPayloadParser.pas` к `TestRunner.dpr` |
 | 2026-06-18 | `TestDecryptInvalidData` — изменено ожидание: функция возвращает пустую строку вместо выброса исключения (более безопасное поведение) |

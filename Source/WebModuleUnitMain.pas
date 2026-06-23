@@ -137,12 +137,12 @@ var
   FileSize: Int64;
   Conn: TFDConnection;
   Qry: TFDQuery;
-  LogId: Integer;
+  LogId: Int64;
   AuthToken: string;
   DetailsPayload: TJSONObject;
   DetailsStr: string;
   QryUser: TFDQuery;
-  UserID: Integer;
+  UserID: Int64;
 begin
   Handled := True;
 
@@ -172,7 +172,7 @@ begin
         QryUser.ParamByName('token').AsString := AuthToken;
         QryUser.Open;
         if not QryUser.IsEmpty then
-          UserID := QryUser.FieldByName('user_id').AsInteger
+          UserID := QryUser.FieldByName('user_id').AsLargeInt
         else
           UserID := 0;
         QryUser.Close;
@@ -309,7 +309,7 @@ begin
               'INSERT INTO audit_logs (user_id, event_type, occurred_at, location, details, created_at) ' +
               'VALUES (:user_id, :event_type, :occurred_at, point(:lon, :lat), :details, NOW()) ' +
               'RETURNING id';
-            Qry.ParamByName('user_id').AsInteger := UserID;
+            Qry.ParamByName('user_id').AsLargeInt := UserID;
             Qry.ParamByName('event_type').AsString := 'mobile_audit';
             Qry.ParamByName('occurred_at').AsDateTime := Now;
             Qry.ParamByName('lon').AsFloat := Lon;
@@ -341,7 +341,7 @@ begin
             Qry.ParamByName('details').Size := 0;
             Qry.ParamByName('details').AsString := DetailsStr;
             Qry.Open;
-            LogId := Qry.FieldByName('id').AsInteger;
+            LogId := Qry.FieldByName('id').AsLargeInt;
 
             Qry.SQL.Text :=
               'INSERT INTO audit_files (log_id, file_uuid, storage_path, original_filename, file_size, checksum_sha256, mime_type) ' +
@@ -397,7 +397,7 @@ procedure TWebModule1.WebModuleBeforeDispatch(Sender: TObject;
 var
   SessionToken: string;
   PathInfo: string;
-  UserID: Integer;
+  UserID: Int64;
   QryUser: TFDQuery;
   Conn: TFDConnection;
 begin
@@ -457,7 +457,7 @@ begin
           QryUser.ParamByName('token').AsString := SessionToken;
           QryUser.Open;
           if not QryUser.IsEmpty then
-            UserID := QryUser.FieldByName('user_id').AsInteger
+            UserID := QryUser.FieldByName('user_id').AsLargeInt
           else
             UserID := 0;
           QryUser.Close;

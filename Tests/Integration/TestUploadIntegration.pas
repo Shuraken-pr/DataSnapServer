@@ -1,4 +1,4 @@
-﻿unit TestUploadIntegration;
+unit TestUploadIntegration;
 
 interface
 
@@ -123,7 +123,7 @@ var
   FinalFileCount: Integer;
 begin
   // Arrange: создаём валидную сессию
-  AuthToken := CreateTestSession(1, 24);
+  AuthToken := CreateTestSession(GetTestUserID, 24);
   
   // Создаём тестовый JPEG (100 КБ)
   TestJpeg := CreateTestJpeg(100);
@@ -211,8 +211,8 @@ begin
       'SELECT user_id FROM audit_logs ORDER BY id DESC LIMIT 1';
     QryUserCheck.Open;
     if not QryUserCheck.IsEmpty then
-      Assert.AreEqual(1, QryUserCheck.FieldByName('user_id').AsInteger,
-        'audit_logs.user_id should match the session owner (user_id=1)');
+      Assert.AreEqual(GetTestUserID, QryUserCheck.FieldByName('user_id').AsLargeInt,
+        'audit_logs.user_id should match the session owner (test_user)');
     QryUserCheck.Close;
   finally
     QryUserCheck.Free;
@@ -231,7 +231,7 @@ var
   FinalFileCount: Integer;
 begin
   // Arrange: создаём валидную сессию
-  AuthToken := CreateTestSession(1, 24);
+  AuthToken := CreateTestSession(GetTestUserID, 24);
   
   // Создаём тестовый PNG (не JPEG)
   TestPng := CreateTestPng;
@@ -285,7 +285,7 @@ var
   FinalFileCount: Integer;
 begin
   // Arrange: создаём валидную сессию
-  AuthToken := CreateTestSession(1, 24);
+  AuthToken := CreateTestSession(GetTestUserID, 24);
   
   // Создаём тестовый JPEG размером 11 МБ (> 10 МБ лимит)
   LargeJpeg := CreateTestJpeg(11 * 1024);  // 11 МБ
@@ -337,7 +337,7 @@ var
   FinalFileCount: Integer;
 begin
   // Arrange: создаём валидную сессию
-  AuthToken := CreateTestSession(1, 24);
+  AuthToken := CreateTestSession(GetTestUserID, 24);
   
   // Запоминаем количество записей до теста
   InitialLogCount := GetTableCount('audit_logs');
@@ -380,11 +380,11 @@ var
   TestJpeg: TBytes;
   Base64Data: string;
   QryUserCheck: TFDQuery;
-  ActualUserID: Integer;
+  ActualUserID: Int64;
   SessionToken: string;
 begin
   // Arrange: создаём сессию для user_id=2 (не хардкод 1)
-  SessionToken := CreateTestSession(2, 24);
+  SessionToken := CreateTestSession(GetTestUserID2, 24);
   AuthToken := SessionToken;
   
   // Создаём тестовый JPEG (100 КБ)
@@ -431,8 +431,8 @@ begin
     QryUserCheck.Open;
     if not QryUserCheck.IsEmpty then
     begin
-      ActualUserID := QryUserCheck.FieldByName('user_id').AsInteger;
-      Assert.AreEqual(2, ActualUserID,
+      ActualUserID := QryUserCheck.FieldByName('user_id').AsLargeInt;
+      Assert.AreEqual(GetTestUserID2, ActualUserID,
         'audit_logs.user_id must match the token owner (2), not hardcoded 1');
     end
     else
@@ -455,7 +455,7 @@ var
   FinalFileCount: Integer;
 begin
   // Arrange: создаём валидную сессию
-  AuthToken := CreateTestSession(1, 24);
+  AuthToken := CreateTestSession(GetTestUserID, 24);
   
   // Создаём тестовый JPEG (100 КБ)
   TestJpeg := CreateTestJpeg(100);
