@@ -73,18 +73,18 @@ end;
 
 procedure TfrmServer.CheckAndLoadSettings;
 var
-  Settings: TServerSettings;
+//  Settings: TServerSettings;
   NeedConfig: Boolean;
 begin
-  Settings := TServerSettings.Create;
-  try
+//  Settings := TServerSettings.Create;
+//  try
     // 1. Загружаем из файла
-    NeedConfig := not Settings.LoadFromFile;
+    NeedConfig := not AppSettings.LoadFromFile;
 
     // 2. Если файл загрузился, пробуем соединиться
     if not NeedConfig then
     begin
-      if not Settings.TestConnection then
+      if not AppSettings.TestConnection then
         NeedConfig := True;
     end;
 
@@ -92,7 +92,7 @@ begin
     if NeedConfig then
     begin
       Caption := 'Настройка сервера';
-      if not TfrmServerSettings.Execute(Settings) then
+      if not TfrmServerSettings.Execute(AppSettings) then
       begin
         Log.Info('CheckAndLoadSettings: Server startup cancelled by user');
         ShowMessage('Запуск сервера отменён: нет валидных настроек БД.');
@@ -101,14 +101,14 @@ begin
     end;
 
     // 4. Применяем в FDManager (теперь мы уверены, что Settings валидны)
-    ApplySettingsToManager(Settings);
+    ApplySettingsToManager(AppSettings);
 
-    Caption := 'DataSnap Server: ' + Settings.Database;
+    Caption := 'DataSnap Server: ' + AppSettings.Database;
     Log.Info(Format('CheckAndLoadSettings: Settings loaded: %s@%s:%d/%s',
-    [Settings.Username, Settings.Host, Settings.Port, Settings.Database]));
-  finally
-    Settings.Free;
-  end;
+    [AppSettings.Username, AppSettings.Host, AppSettings.Port, AppSettings.Database]));
+//  finally
+//    Settings.Free;
+//  end;
 end;
 
 procedure TfrmServer.CheckCleanupTaskStatus;

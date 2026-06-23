@@ -1,4 +1,4 @@
-unit WebModuleUnitMain;
+﻿unit WebModuleUnitMain;
 
 // ИСПРАВЛЕНО по итогам код-ревью:
 //   [CRITICAL] Добавлена базовая аутентификация через TDSAuthenticationManager
@@ -19,7 +19,8 @@ uses
   Data.DB, FireDAC.Comp.DataSet, FireDAC.Comp.Client, FireDAC.UI.Intf,
   FireDAC.Stan.Def, FireDAC.Stan.Pool, FireDAC.Phys, FireDAC.Phys.PG,
   FireDAC.Phys.PGDef, FireDAC.VCLUI.Wait, ServerSessionContext,
-  System.JSON, UploadUtils, System.NetEncoding, ServerSettings;
+  System.JSON, UploadUtils, System.NetEncoding, ServerSettings,
+  RateLimiter, SecurityAuditor;
 
 type
   TWebModule1 = class(TWebModule)
@@ -143,10 +144,43 @@ var
   DetailsStr: string;
   QryUser: TFDQuery;
   UserID: Int64;
+  Limiter: TRateLimiter;
+  Auditor: TSecurityAuditor;
+  ClientIP: string;
 begin
   Handled := True;
+  ClientIP := string(Request.RemoteAddr);
 
   try
+    // 🔑 RATE LIMITING для /upload
+    Conn := TFDConnection.Create(nil);
+    if Assigned(Conn) and (AppSettings.ApplyToConn(Conn)) then
+    try
+      Limiter := TRateLimiter.Create(Conn);
+      try
+        if Limiter.CheckLimit(ClientIP, '/upload') = rlExceeded then
+        begin
+          Auditor := TSecurityAuditor.Create(Conn);
+          try
+            Auditor.LogEvent('rate_limit_exceeded', '', ClientIP,
+              'Endpoint: /upload (limit: 100/hour)', ssWarning);
+          finally
+            Auditor.Free;
+          end;
+
+          Response.StatusCode := 429;
+          Response.ContentType := 'application/json';
+          Response.Content := '{"result":"error","message":"Too Many Requests"}';
+          Exit;
+        end;
+        Limiter.RecordRequest(ClientIP, '/upload');
+      finally
+        Limiter.Free;
+      end;
+    finally
+      FreeAndNil(Conn);
+    end;
+
     AuthToken := string(Request.GetFieldByName('X-Session-Token'));
     if AuthToken = '' then
       AuthToken := string(Request.GetFieldByName('HTTP_X_SESSION_TOKEN'));
@@ -400,8 +434,13 @@ var
   UserID: Int64;
   QryUser: TFDQuery;
   Conn: TFDConnection;
+  Limiter: TRateLimiter;
+  Auditor: TSecurityAuditor;
+  ClientIP: string;
 begin
-  CurrentUserID := 0; // <--- ДОБАВИТЬ ЭТУ СТРОКУ (Сброс в начале каждого запроса)
+  CurrentUserID := 0;
+  ClientIP := string(Request.RemoteAddr);
+  CurrentIP := ClientIP;  // 🔑 Сохраняем IP в потоковую переменную
   PathInfo := string(Request.InternalPathInfo);
 
   // 🔑 НОВОЕ: Если запрос идет на корень сайта (например, из браузера),
@@ -426,7 +465,35 @@ begin
   begin
     if ContainsText(PathInfo, '/Login') then
     begin
-      // Пропускаем проверку для Login
+      // 🔑 RATE LIMITING для Login
+      Conn := TFDConnection.Create(nil);
+      if Assigned(Conn) and (AppSettings.ApplyToConn(Conn)) then
+      try
+        Limiter := TRateLimiter.Create(Conn);
+        try
+          if Limiter.CheckLimit(ClientIP, '/Login') = rlExceeded then
+          begin
+            Auditor := TSecurityAuditor.Create(Conn);
+            try
+              Auditor.LogEvent('rate_limit_exceeded', '', ClientIP,
+                'Endpoint: /Login (limit: 20/hour)', ssWarning);
+            finally
+              Auditor.Free;
+            end;
+
+            Response.StatusCode := 429;
+            Response.Content := '{"error":"Too Many Requests"}';
+            Response.ContentType := 'application/json';
+            Handled := True;
+            Exit;
+          end;
+          Limiter.RecordRequest(ClientIP, '/Login');
+        finally
+          Limiter.Free;
+        end;
+      finally
+        FreeAndNil(Conn);
+      end;
     end
     else
     begin

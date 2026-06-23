@@ -12,7 +12,8 @@ uses
   TestBase in 'TestBase.pas',
   TestLoginIntegration in 'TestLoginIntegration.pas',
   TestUploadIntegration in 'TestUploadIntegration.pas',
-  TestSyncIntegration in 'TestSyncIntegration.pas';
+  TestSyncIntegration in 'TestSyncIntegration.pas',
+  TestSecurityIntegration in 'TestSecurityIntegration.pas';
 
 var
   Runner: ITestRunner;

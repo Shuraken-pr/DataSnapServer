@@ -1,11 +1,12 @@
-unit TestBase;
+﻿unit TestBase;
 
 interface
 
 uses
   System.SysUtils, System.Classes, System.Net.HttpClient, System.Net.URLClient,
   System.JSON, Data.DB, FireDAC.Comp.Client, FireDAC.Phys.PG, FireDAC.Stan.Def,
-  FireDAC.Stan.Async, DUnitX.TestFramework, System.Generics.Collections, FireDAC.DApt;
+  FireDAC.Stan.Async, DUnitX.TestFramework, System.Generics.Collections,
+  FireDAC.Stan.Param, FireDAC.DApt;
 
 type
   /// <summary>
@@ -228,7 +229,7 @@ begin
   // 🔑 DataSnap REST для примитивных параметров ожидает JSON body в POST
   JSONPayload := Format('{"AUsername":"%s","APassword":"%s"}', [Username, Password]);
   
-  Response := PostToServer('/datasnap/rest/TServerMethods1/Login', JSONPayload, False);
+  Response := PostToServer('/datasnap/rest/TServerMethods1/updateLogin', JSONPayload, False);
   
   if Response.StatusCode <> 200 then
     raise Exception.CreateFmt('Login failed: HTTP %d - %s', 
@@ -295,10 +296,10 @@ begin
   Qry := TFDQuery.Create(nil);
   try
     Qry.Connection := FDBConnection;
-    Qry.SQL.Text := Format(
-      'SELECT create_test_session(%d, INTERVAL ''%d hours'')',
-      [UserID, ExpiresInHours]
-    );
+    Qry.SQL.Text := 
+      'SELECT create_test_session(:user_id, make_interval(hours => :hours))';
+    Qry.ParamByName('user_id').AsLargeInt := UserID;
+    Qry.ParamByName('hours').AsInteger := ExpiresInHours;
     Qry.Open;
     
     if not Qry.IsEmpty then
@@ -320,10 +321,10 @@ begin
   Qry := TFDQuery.Create(nil);
   try
     Qry.Connection := FDBConnection;
-    Qry.SQL.Text := Format(
-      'SELECT create_expired_test_session(%d, INTERVAL ''%d hours'')',
-      [UserID, ExpiredAgoHours]
-    );
+    Qry.SQL.Text := 
+      'SELECT create_expired_test_session(:user_id, make_interval(hours => :hours))';
+    Qry.ParamByName('user_id').AsLargeInt := UserID;
+    Qry.ParamByName('hours').AsInteger := ExpiredAgoHours;
     Qry.Open;
     
     if not Qry.IsEmpty then

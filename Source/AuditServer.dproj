@@ -107,6 +107,7 @@ $(PostBuildEvent)]]></PostBuildEvent>
         <DCC_MapFile>3</DCC_MapFile>
         <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
         <VerInfo_Locale>1033</VerInfo_Locale>
+        <Debugger_RunParams>/test</Debugger_RunParams>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_1_Win64)'!=''">
         <AppDPIAwarenessMode>PerMonitorV2</AppDPIAwarenessMode>
@@ -146,6 +147,10 @@ $(PostBuildEvent)]]></PostBuildEvent>
         <DCCReference Include="ServerLogger.pas"/>
         <DCCReference Include="ServerSessionContext.pas"/>
         <DCCReference Include="UploadUtils.pas"/>
+        <DCCReference Include="BruteForceProtector.pas"/>
+        <DCCReference Include="PasswordHasher.pas"/>
+        <DCCReference Include="RateLimiter.pas"/>
+        <DCCReference Include="SecurityAuditor.pas"/>
         <None Include="..\js\base64.js"/>
         <None Include="..\js\serverfunctionexecutor.js"/>
         <None Include="..\js\json2.js"/>

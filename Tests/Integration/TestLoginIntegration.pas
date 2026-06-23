@@ -29,7 +29,7 @@ type
     /// <summary>INT-003: Использование валидного токена для SyncUpload</summary>
     [Test]
     procedure TestValidToken_AccessProtectedEndpoint_Returns200;
-    
+
     /// <summary>INT-004: Использование невалидного токена</summary>
     [Test]
     procedure TestInvalidToken_AccessProtectedEndpoint_Returns401;

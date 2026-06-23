@@ -8,7 +8,10 @@
 
 ### 🔒 Безопасность (Security)
 * **Windows DPAPI:** Пароли от БД и API-ключи хранятся в `db_settings.xml` в зашифрованном виде. Используется флаг `CRYPTPROTECT_LOCAL_MACHINE` — расшифровка возможна только на том же компьютере, где было произведено шифрование (любым пользователем на этой машине).
-* **Сессионная аутентификация с bcrypt:** Вместо статических ключей используется механизм временных токенов (GUID) с ограниченным временем жизни (TTL). Пароли хранятся в таблице `users` в виде bcrypt-хешей (12 раундов, расширение `pgcrypto` PostgreSQL). Проверка пароля выполняется через `crypt(password, hash) = hash` на уровне БД.
+* **Сессионная аутентификация с bcrypt:** Вместо статических ключей используется механизм временных токенов (GUID) с ограниченным временем жизни (TTL). Пароли хранятся в таблице `users` в виде bcrypt-хешей (12 раундов, расширение `pgcrypto` PostgreSQL). Проверка пароля выполняется через `crypt(password, hash) = hash` на уровне БД. Fallback на plain text для обратной совместимости.
+* **Защита от brute force:** После 5 неудачных попыток входа аккаунт блокируется на 30 минут. Реализовано через `BruteForceProtector` (модуль `BruteForceProtector.pas`).
+* **Rate limiting:** Защита от DDoS через ограничение количества запросов с одного IP (20 запросов/час на Login, 100 запросов/час на Upload). Реализовано через `RateLimiter` (модуль `RateLimiter.pas`).
+* **Security audit logging:** Все события безопасности (успешный/неудачный вход, блокировка аккаунта, rate limit) записываются в таблицу `security_events`. Реализовано через `SecurityAuditor` (модуль `SecurityAuditor.pas`).
 * **Защита от подмены данных (Privilege Escalation):** Сервер **полностью игнорирует** поле `user_id`, передаваемое клиентом в JSON-теле запроса. Реальный `user_id` извлекается исключительно из валидной сессии и принудительно подставляется в SQL-запрос.
 * **Ограничения размера запроса:** Входящий JSON-пакет ограничен 1 МБ (`MAX_JSON_LENGTH = 1048576`). Массив событий — не более 1000 элементов (`MAX_ARRAY_ITEMS = 1000`). Превышение любого лимита немедленно отклоняется.
 * **Сокрытие внутренних ошибок:** При сбоях БД клиент получает только generic-сообщение (`"Database operation failed"`). Детали ошибки (`E.Message`) записываются только в серверный лог и никогда не передаются наружу.
@@ -41,6 +44,9 @@ DataSnapServer/
 │   ├── ServerLogger.pas          # Инициализация глобального экземпляра LoggerPro (мин. уровень Info, ротация 15×10 МБ)
 │   ├── WinDPAPIUtils.pas         # Обертка над Crypt32.dll (CryptProtectData / CryptUnprotectData, флаг CRYPTPROTECT_LOCAL_MACHINE)
 │   ├── UploadUtils.pas           # Утилиты для загрузки фото: проверка JPEG, SHA-256, генерация UUID, атомарное сохранение
+│   ├── BruteForceProtector.pas   # Защита от brute force: блокировка после 5 неудачных попыток, сброс при успешном входе
+│   ├── RateLimiter.pas           # Rate limiting: ограничение запросов с одного IP (20/час Login, 100/час Upload)
+│   ├── SecurityAuditor.pas       # Логирование событий безопасности в таблицу security_events
 │   └── frServerSettings.pas      # UI формы настроек: тест соединения, генерация API-ключа, сброс флага теста при изменении полей
 ├── migrations/
 │   ├── 001_security_users.sql    # Миграция БД: расширение таблицы users, создание таблиц безопасности
@@ -159,7 +165,41 @@ CREATE TABLE IF NOT EXISTS audit_files (
 CREATE INDEX IF NOT EXISTS idx_audit_files_log ON audit_files(log_id);
 CREATE INDEX IF NOT EXISTS idx_audit_files_uuid ON audit_files(file_uuid);
 
--- 6. Очистка просроченных сессий (выполняется при старте сервера)
+-- 6. Таблица событий безопасности (аудит)
+CREATE TABLE IF NOT EXISTS security_events (
+    id BIGSERIAL PRIMARY KEY,
+    event_type VARCHAR(50) NOT NULL,
+    username TEXT,
+    user_id BIGINT REFERENCES users(id),
+    ip_address INET,
+    details TEXT,
+    severity VARCHAR(20) DEFAULT 'info',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_security_events_type ON security_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_security_events_user ON security_events(user_id);
+CREATE INDEX IF NOT EXISTS idx_security_events_created ON security_events(created_at);
+
+-- 7. Таблица rate limiting (защита от DDoS)
+CREATE TABLE IF NOT EXISTS rate_limits (
+    id BIGSERIAL PRIMARY KEY,
+    ip_address INET NOT NULL,
+    endpoint VARCHAR(100) NOT NULL,
+    request_count INTEGER DEFAULT 1,
+    window_start TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(ip_address, endpoint)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rate_limits_ip ON rate_limits(ip_address);
+CREATE INDEX IF NOT EXISTS idx_rate_limits_endpoint ON rate_limits(endpoint);
+
+-- 8. Колонки блокировки аккаунта в users
+ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP;
+
+-- 9. Очистка просроченных сессий (выполняется при старте сервера)
 DELETE FROM user_sessions WHERE expires_at < CURRENT_TIMESTAMP;
 ```
 
@@ -420,7 +460,7 @@ POST /upload
 
 ## 🧪 Автоматическое тестирование
 
-Проект покрыт **59 автоматическими тестами** (42 модульных + 17 интеграционных) на фреймворке **DUnitX** со **100% успешным прохождением**.
+Проект покрыт **68 автоматическими тестами** (42 модульных + 26 интеграционных) на фреймворке **DUnitX** со **100% успешным прохождением**.
 
 ### Модульные тесты (42 теста)
 
@@ -440,7 +480,8 @@ POST /upload
 | Авторизация (Login) | 7 | Полный цикл авторизации, валидные/невалидные токены, истечение сессий, множественные сессии, очистка |
 | Загрузка файлов | 6 | Загрузка JPEG, валидация формата/размера/координат, откат транзакций, user_id из токена |
 | Синхронизация | 4 | Batch-синхронизация, валидация координат, дубликаты, пустой массив |
-| **ИТОГО** | **17** | **100% прохождение** ✅ |
+| Безопасность (Security) | 9 | Brute force (5 попыток → блокировка), rate limiting (20/100 в час), security audit logging, разблокировка, разные IP |
+| **ИТОГО** | **26** | **100% прохождение** ✅ |
 
 ### Запуск модульных тестов
 
@@ -516,8 +557,8 @@ docker exec -it audit-test-db psql -U test_user -d audit_test -c "SELECT id, use
 - [ ] Настройка фоновой задачи `pg_cron` в PostgreSQL для регулярной очистки просроченных сессий (в дополнение к очистке при старте сервера).
 - [ ] Расширенный алертинг: отправка уведомлений о критических ошибках (Fatal) в Telegram или по электронной почте через дополнительные аппендеры LoggerPro.
 - [ ] Мониторинг производительности: интеграция с Prometheus/Grafana для отслеживания метрик (количество запросов, время отклика, размер пула соединений).
-- [ ] Rate limiting: защита от DDoS-атак через ограничение количества запросов с одного IP (через Nginx или встроенный механизм).
-- [x] ~~Интеграционные тесты с реальной БД PostgreSQL (через Docker-контейнер)~~ ✅ **Реализовано** (17 тестов, Docker Compose, 100% прохождение)
+- [x] ~~Rate limiting: защита от DDoS-атак через ограничение количества запросов с одного IP~~ ✅ **Реализовано** (20/час Login, 100/час Upload, через PostgreSQL)
+- [x] ~~Интеграционные тесты с реальной БД PostgreSQL (через Docker-контейнер)~~ ✅ **Реализовано** (26 тестов, Docker Compose, 100% прохождение)
 - [x] ~~Загрузка файлов (фотографий) через Base64 в JSON~~ ✅ **Реализовано** (endpoint `/upload`)
 - [x] ~~Подключение тестов `TestUploadUtils.pas` и `TestUploadPayloadParser.pas` к `TestRunner.dpr`~~ ✅ **Выполнено** (42 теста, 100% прохождение)
 

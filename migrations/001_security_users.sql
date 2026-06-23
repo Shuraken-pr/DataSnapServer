@@ -178,7 +178,7 @@ CREATE TABLE IF NOT EXISTS security_events (
     username TEXT,
     ip_address TEXT NOT NULL,
     user_agent TEXT,
-    details JSONB,
+    details TEXT,
     severity TEXT NOT NULL DEFAULT 'info',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT chk_security_severity CHECK (severity IN ('info', 'warning', 'critical'))

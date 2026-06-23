@@ -17,7 +17,15 @@ uses
   TestServerSettings in 'TestServerSettings.pas',
   TestWinDPAPIUtils in 'TestWinDPAPIUtils.pas',
   TestUploadUtils in 'TestUploadUtils.pas',
-  TestUploadPayloadParser in 'TestUploadPayloadParser.pas';
+  TestUploadPayloadParser in 'TestUploadPayloadParser.pas',
+  TestSecurityAuditor in 'TestSecurityAuditor.pas',
+  TestBruteForceProtector in 'TestBruteForceProtector.pas',
+  TestRateLimiter in 'TestRateLimiter.pas',
+  TestPasswordHasher in 'TestPasswordHasher.pas',
+  SecurityAuditor in '..\Source\SecurityAuditor.pas',
+  BruteForceProtector in '..\Source\BruteForceProtector.pas',
+  RateLimiter in '..\Source\RateLimiter.pas',
+  PasswordHasher in '..\Source\PasswordHasher.pas';
 
 { keep comment here to protect the following conditional from being removed by the IDE when adding a unit }
 {$IFNDEF TESTINSIGHT}

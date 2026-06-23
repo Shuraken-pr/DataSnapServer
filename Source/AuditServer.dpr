@@ -14,7 +14,11 @@ uses
   WinDPAPIUtils in 'WinDPAPIUtils.pas',
   ServerLogger in 'ServerLogger.pas',
   ServerSessionContext in 'ServerSessionContext.pas',
-  UploadUtils in 'UploadUtils.pas';
+  UploadUtils in 'UploadUtils.pas',
+  BruteForceProtector in 'BruteForceProtector.pas',
+  PasswordHasher in 'PasswordHasher.pas',
+  RateLimiter in 'RateLimiter.pas',
+  SecurityAuditor in 'SecurityAuditor.pas';
 
 {$R *.res}
 

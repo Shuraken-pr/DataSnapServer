@@ -1,4 +1,4 @@
-unit ServerMethodsUnitMain;
+﻿unit ServerMethodsUnitMain;
 
 interface
 
@@ -39,7 +39,7 @@ implementation
 {$R *.dfm}
 
 
-uses System.StrUtils, System.DateUtils, ServerLogger, ServerSettings;
+uses System.StrUtils, System.DateUtils, ServerLogger, ServerSettings, BruteForceProtector, SecurityAuditor;
 
 // ИСПРАВЛЕНО: Вспомогательная функция для формирования JSON-ответа
 // (заменяет ручную конкатенацию строк — гарантирует корректное экранирование)
@@ -69,6 +69,7 @@ procedure TServerMethods1.DSServerModuleCreate(Sender: TObject);
 begin
   PGConn.ConnectionName := CONN_DEF_NAME;
   PGConn.LoginPrompt := False;
+  AppSettings.ApplyToConn(PGConn);
 end;
 
 // Вспомогательная функция: парсинг ISO 8601 даты
@@ -99,11 +100,18 @@ var
   QryUser: TFDQuery;
   RootVal: TJSONValue;
   curUserName, curPassword: string;
+  Protector: TBruteForceProtector;
+  Auditor: TSecurityAuditor;
+  ClientIP: string;
+  IsLocked: Boolean;
 begin
   Log.Info(Format('Попытка входа пользователя: %s', [AUsername]));
   UserID := 0;
   curUserName := AUsername;
   curPassword := APassword;
+  ClientIP := CurrentIP;
+  if ClientIP = '' then
+    ClientIP := 'unknown';
 
   RootVal := TJSONObject.ParseJSONValue(AUsername);
   try
@@ -116,38 +124,34 @@ begin
     RootVal.Free;
   end;
 
-  // 🔑 ИСПРАВЛЕНИЕ: Проверка через собственную таблицу users с bcrypt (pgcrypto)
-  // Fallback: если pgcrypto не установлен, пробуем plain text (для тестов/legacy)
-  QryUser := TFDQuery.Create(nil);
+  // 🔑 ИНИЦИАЛИЗАЦИЯ модулей безопасности
+  Protector := TBruteForceProtector.Create(PGConn);
+  Auditor := TSecurityAuditor.Create(PGConn);
   try
-    AppSettings.ApplyToConn(PGConn);
-    QryUser.Connection := PGConn;
+    // 🔑 ШАГ 1: Проверка блокировки аккаунта
+    if Protector.IsAccountLocked(curUserName) then
+    begin
+      Log.Warn(Format('Попытка входа в заблокированный аккаунт: %s', [curUserName]));
+      Auditor.LogEvent('login_blocked', curUserName, ClientIP,
+        'Attempt to login to locked account', ssWarning);
+      Result := TJSONObject.Create;
+      Result.AddPair('status', 'error');
+      Result.AddPair('message', 'Account temporarily locked. Try again later.');
+      Exit;
+    end;
 
-    // Попытка 1: bcrypt через pgcrypto crypt()
+    // 🔑 ШАГ 2: Проверка пароля через bcrypt (pgcrypto) с fallback на plain text
+    QryUser := TFDQuery.Create(nil);
     try
-      QryUser.SQL.Text :=
-        'SELECT id FROM users ' +
-        'WHERE username = :username '+
-        '  AND password_hash = crypt(:password, password_hash) ' +
-        '  AND is_active = TRUE ' +
-        'LIMIT 1';
-      QryUser.ParamByName('username').AsString := curUserName;
-      QryUser.ParamByName('password').AsString := curPassword;
-      QryUser.Open;
-      QryUser.First;
+      AppSettings.ApplyToConn(PGConn);
+      QryUser.Connection := PGConn;
 
-      if not QryUser.IsEmpty then
-      begin
-        if not QryUser.FieldByName('id').IsNull then
-          UserID := QryUser.FieldByName('id').AsLargeInt;
-      end
-        else
-      begin
-        QryUser.Close;
+      // Попытка 1: bcrypt через pgcrypto crypt()
+      try
         QryUser.SQL.Text :=
           'SELECT id FROM users ' +
           'WHERE username = :username ' +
-          '  AND password_hash = :password ' +
+          '  AND password_hash = crypt(:password, password_hash) ' +
           '  AND is_active = TRUE ' +
           'LIMIT 1';
         QryUser.ParamByName('username').AsString := curUserName;
@@ -156,86 +160,132 @@ begin
         QryUser.First;
 
         if not QryUser.IsEmpty then
+        begin
           if not QryUser.FieldByName('id').IsNull then
             UserID := QryUser.FieldByName('id').AsLargeInt;
-      end;
-      QryUser.Close;
-    except
-      on E: Exception do
-      begin
-        QryUser.Close;
-        Log.Warn('bcrypt failed (pgcrypto may be missing), trying plain text fallback: ' + E.Message);
-
-        // Попытка 2: plain text fallback (для тестов без pgcrypto)
-        try
+        end
+        else
+        begin
+          QryUser.Close;
           QryUser.SQL.Text :=
             'SELECT id FROM users ' +
             'WHERE username = :username ' +
             '  AND password_hash = :password ' +
             '  AND is_active = TRUE ' +
             'LIMIT 1';
-          QryUser.ParamByName('username').AsString := AUsername;
-          QryUser.ParamByName('password').AsString := APassword;
+          QryUser.ParamByName('username').AsString := curUserName;
+          QryUser.ParamByName('password').AsString := curPassword;
           QryUser.Open;
+          QryUser.First;
 
           if not QryUser.IsEmpty then
             if not QryUser.FieldByName('id').IsNull then
               UserID := QryUser.FieldByName('id').AsLargeInt;
+        end;
+        QryUser.Close;
+      except
+        on E: Exception do
+        begin
           QryUser.Close;
-        except
-          on E2: Exception do
-          begin
+          Log.Warn('bcrypt failed (pgcrypto may be missing), trying plain text fallback: ' + E.Message);
+
+          // Попытка 2: plain text fallback (для тестов без pgcrypto)
+          try
+            QryUser.SQL.Text :=
+              'SELECT id FROM users ' +
+              'WHERE username = :username ' +
+              '  AND password_hash = :password ' +
+              '  AND is_active = TRUE ' +
+              'LIMIT 1';
+            QryUser.ParamByName('username').AsString := curUserName;
+            QryUser.ParamByName('password').AsString := curPassword;
+            QryUser.Open;
+
+            if not QryUser.IsEmpty then
+              if not QryUser.FieldByName('id').IsNull then
+                UserID := QryUser.FieldByName('id').AsLargeInt;
             QryUser.Close;
-            Log.Error('Authentication system error: ' + E2.Message);
-            Result := TJSONObject.Create;
-            Result.AddPair('status', 'error');
-            Result.AddPair('message', 'Authentication system error');
-            Exit;
+          except
+            on E2: Exception do
+            begin
+              QryUser.Close;
+              Log.Error('Authentication system error: ' + E2.Message);
+              Result := TJSONObject.Create;
+              Result.AddPair('status', 'error');
+              Result.AddPair('message', 'Authentication system error');
+              Exit;
+            end;
           end;
         end;
       end;
+    finally
+      QryUser.Free;
     end;
-  finally
-    QryUser.Free;
-  end;
 
-  if UserID = 0 then
-  begin
-    Log.Warn(Format('Неудачная попытка входа: %s', [AUsername]));
-    Result := TJSONObject.Create;
-    Result.AddPair('status', 'error');
-    Result.AddPair('message', 'Invalid username or password');
-    Exit;
-  end;
-
-  // 2. Генерируем токен и сохраняем в БД, используя ОСНОВНОЙ PGConn
-  Token := TGUID.NewGuid.ToString;
-  ExpirationTime := IncMinute(Now, 24 * 60);
-
-  PGConn.StartTransaction;
-  try
-    qrySession.Close;
-    qrySession.ParamByName('uid').AsLargeInt := UserID;
-    qrySession.ParamByName('token').AsString := Token;
-    qrySession.ParamByName('exp').AsDateTime := ExpirationTime;
-    qrySession.ExecSQL;
-    PGConn.Commit;
-
-    Log.Info(Format('Успешный вход. Пользователь ID: %d, выдан токен.', [UserID]));
-
-    Result := TJSONObject.Create;
-    Result.AddPair('status', 'success');
-    Result.AddPair('token', Token);
-    Result.AddPair('user_id', TJSONNumber.Create(UserID));
-  except
-    on E: Exception do
+    // 🔑 ШАГ 3: Обработка результата проверки пароля
+    if UserID = 0 then
     begin
-      PGConn.Rollback;
-      Log.Error('Ошибка создания сессии: ' + E.Message);
+      Log.Warn(Format('Неудачная попытка входа: %s', [curUserName]));
+
+      // 🔑 Записываем неудачную попытку
+      IsLocked := Protector.RecordFailedAttempt(curUserName, ClientIP);
+      Auditor.LogEvent('login_failed', curUserName, ClientIP,
+        Format('Invalid credentials (attempt %d/%d)',
+        [Protector.GetFailedAttempts(curUserName), Protector.MaxAttempts]),
+        ssWarning);
+
+      if IsLocked then
+      begin
+        Log.Warn(Format('Аккаунт заблокирован после %d попыток: %s',
+          [Protector.MaxAttempts, curUserName]));
+        Auditor.LogEvent('account_locked', curUserName, ClientIP,
+          Format('Locked after %d failed attempts', [Protector.MaxAttempts]),
+          ssCritical);
+      end;
+
       Result := TJSONObject.Create;
       Result.AddPair('status', 'error');
-      Result.AddPair('message', 'Internal server error');
+      Result.AddPair('message', 'Invalid username or password');
+      Exit;
     end;
+
+    // 🔑 ШАГ 4: Успешный вход — сброс счётчика и запись события
+    Protector.ResetFailedAttempts(curUserName);
+    Auditor.LogEvent('login_success', curUserName, ClientIP,
+      Format('User ID: %d', [UserID]), ssInfo);
+
+    // ШАГ 5: Генерируем токен и сохраняем в БД
+    Token := TGUID.NewGuid.ToString;
+    ExpirationTime := IncMinute(Now, 24 * 60);
+
+    PGConn.StartTransaction;
+    try
+      qrySession.Close;
+      qrySession.ParamByName('uid').AsLargeInt := UserID;
+      qrySession.ParamByName('token').AsString := Token;
+      qrySession.ParamByName('exp').AsDateTime := ExpirationTime;
+      qrySession.ExecSQL;
+      PGConn.Commit;
+
+      Log.Info(Format('Успешный вход. Пользователь ID: %d, выдан токен.', [UserID]));
+
+      Result := TJSONObject.Create;
+      Result.AddPair('status', 'success');
+      Result.AddPair('token', Token);
+      Result.AddPair('user_id', TJSONNumber.Create(UserID));
+    except
+      on E: Exception do
+      begin
+        PGConn.Rollback;
+        Log.Error('Ошибка создания сессии: ' + E.Message);
+        Result := TJSONObject.Create;
+        Result.AddPair('status', 'error');
+        Result.AddPair('message', 'Internal server error');
+      end;
+    end;
+  finally
+    Protector.Free;
+    Auditor.Free;
   end;
 end;
 
