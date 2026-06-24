@@ -1,4 +1,4 @@
-﻿unit TestBase;
+unit TestBase;
 
 interface
 
@@ -266,7 +266,7 @@ procedure TIntegrationTestBase.CleanupTestData;
 const
   // 🔑 ИСПРАВЛЕНИЕ: Очищаем ВСЕ таблицы, которые использует сервер
   // Порядок важен: сначала дочерние (audit_files), потом родительские (audit_logs, events)
-  del_sql: array[0..3] of string = ('audit_files', 'audit_logs', 'events', 'user_sessions');
+  del_sql: array[0..5] of string = ('audit_files', 'audit_logs', 'events', 'security_events', 'rate_limits', 'user_sessions');
 var
   i: integer;
   Qry: TFDQuery;

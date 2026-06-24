@@ -309,16 +309,23 @@ sudo certbot --nginx -d your-domain.ru
 
 **Endpoint:**
 ```http
-GET /datasnap/rest/TServerMethods1/Login/{username}/{password}
+POST /datasnap/rest/TServerMethods1/Login
+Content-Type: application/json
+
+{"AUsername":"test_user","APassword":"test_password"}
 ```
 
 **Response (200 OK):**
-*Обратите внимание: метод возвращает `TJSONObject`, поэтому DataSnap не добавляет лишнюю обертку `{"result": [...]}`.*
+*DataSnap REST оборачивает TJSONObject в `{"result": [...]}`.*
 ```json
 {
-  "status": "success",
-  "token": "{86AB48DA-D896-4480-8BA8-99E620F05C5E}",
-  "user_id": 1
+  "result": [
+    {
+      "status": "success",
+      "token": "{86AB48DA-D896-4480-8BA8-99E620F05C5E}",
+      "user_id": 1
+    }
+  ]
 }
 ```
 
@@ -561,6 +568,15 @@ docker exec -it audit-test-db psql -U test_user -d audit_test -c "SELECT id, use
 - [x] ~~Интеграционные тесты с реальной БД PostgreSQL (через Docker-контейнер)~~ ✅ **Реализовано** (26 тестов, Docker Compose, 100% прохождение)
 - [x] ~~Загрузка файлов (фотографий) через Base64 в JSON~~ ✅ **Реализовано** (endpoint `/upload`)
 - [x] ~~Подключение тестов `TestUploadUtils.pas` и `TestUploadPayloadParser.pas` к `TestRunner.dpr`~~ ✅ **Выполнено** (42 теста, 100% прохождение)
+- [x] ~~Синхронизация тестовой схемы БД с production-миграциями~~ ✅ **Реализовано** (2026-06-24: добавлена колонка `user_agent` в `security_events`, исправлен `to_jsonb()` в `SecurityAuditor.pas`, все 26 интеграционных тестов проходят успешно)
+
+---
+
+## 📝 История изменений
+
+Подробная история всех версий, включая описание добавленных функций, исправленных ошибок и изменений в архитектуре, доступна в файле [CHANGELOG.md](CHANGELOG.md).
+
+**Последняя версия:** 1.2.1 (2026-06-24) — исправлена синхронизация тестовой схемы БД с production-миграциями, все 26 интеграционных тестов проходят успешно.
 
 ---
 

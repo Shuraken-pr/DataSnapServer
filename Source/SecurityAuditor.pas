@@ -112,7 +112,7 @@ begin
       'INSERT INTO security_events ' +
       '(event_type, username, ip_address, user_agent, details, severity) ' +
       'VALUES (:event_type, :username, :ip_address, :user_agent, ' +
-      'to_jsonb(:details::text), :severity)';
+      ':details, :severity)';
     
     // 🔑 Явно указываем типы параметров для избежания ошибок FireDAC
     Qry.ParamByName('event_type').DataType := ftWideString;

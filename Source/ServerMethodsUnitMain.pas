@@ -1,4 +1,4 @@
-﻿unit ServerMethodsUnitMain;
+unit ServerMethodsUnitMain;
 
 interface
 
@@ -79,7 +79,7 @@ var
   FS: TFormatSettings;
 begin
   // Пробуем стандартные форматы ISO 8601
-  FS := TFormatSettings.Create('en-US');
+  FS := TFormatSettings.Create;
   FS.DateSeparator := '-';
   FS.TimeSeparator := ':';
   FS.ShortDateFormat := 'yyyy-mm-dd';
@@ -401,7 +401,11 @@ begin
           end;
 
           // Парсинг occurred_at
-          OccurredAtStr := Item.GetValue<string>('occurred_at', '');
+          var OccurredAtVal := Item.GetValue('occurred_at');
+          if OccurredAtVal <> nil then
+            OccurredAtStr := OccurredAtVal.Value
+          else
+            OccurredAtStr := '';
           if OccurredAtStr <> '' then
           begin
             if not TryISO8601ToDate(OccurredAtStr, OccurredAt) then

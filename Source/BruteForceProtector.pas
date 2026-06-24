@@ -1,4 +1,4 @@
-﻿unit BruteForceProtector;
+unit BruteForceProtector;
 
 interface
 
@@ -198,8 +198,22 @@ begin
 end;
 
 function TBruteForceProtector.UnlockExpiredAccounts: Integer;
+var
+  Qry: TFDQuery;
 begin
-  Result := FConnection.ExecSQL('SELECT unlock_expired_accounts()');
+  Qry := TFDQuery.Create(nil);
+  try
+    Qry.Connection := FConnection;
+    Qry.SQL.Text := 'SELECT unlock_expired_accounts() as result';
+    Qry.Open;
+    if not Qry.IsEmpty then
+      Result := Qry.FieldByName('result').AsInteger
+    else
+      Result := 0;
+    Qry.Close;
+  finally
+    Qry.Free;
+  end;
 end;
 
 end.

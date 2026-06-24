@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS security_events (
     username    TEXT,
     ip_address  TEXT NOT NULL,
     user_agent  TEXT,
+    user_id     BIGINT REFERENCES users(id),
     details     TEXT,
     severity    TEXT NOT NULL DEFAULT 'info',
     created_at  TIMESTAMPTZ DEFAULT NOW(),
@@ -257,47 +258,10 @@ SELECT 'rate_limits', COUNT(*) FROM rate_limits;
 -- Проверка установки
 -- ============================================================
 
--- 🔑 Security audit logging
-CREATE TABLE IF NOT EXISTS security_events (
-    id BIGSERIAL PRIMARY KEY,
-    event_type VARCHAR(50) NOT NULL,
-    username TEXT,
-    user_id BIGINT REFERENCES users(id),
-    ip_address INET,
-    details TEXT,
-    severity VARCHAR(20) DEFAULT 'info',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_security_events_type ON security_events(event_type);
-CREATE INDEX IF NOT EXISTS idx_security_events_user ON security_events(user_id);
-CREATE INDEX IF NOT EXISTS idx_security_events_created ON security_events(created_at);
-
--- 🔑 Rate limiting
-CREATE TABLE IF NOT EXISTS rate_limits (
-    id BIGSERIAL PRIMARY KEY,
-    ip_address INET NOT NULL,
-    endpoint VARCHAR(100) NOT NULL,
-    request_count INTEGER DEFAULT 1,
-    window_start TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(ip_address, endpoint)
-);
-
-CREATE INDEX IF NOT EXISTS idx_rate_limits_ip ON rate_limits(ip_address);
-CREATE INDEX IF NOT EXISTS idx_rate_limits_endpoint ON rate_limits(endpoint);
-
--- 🔑 Очистка старых записей rate_limits
-CREATE OR REPLACE FUNCTION cleanup_rate_limits() RETURNS INTEGER AS $$
-DECLARE
-    v_count INTEGER;
-BEGIN
-    DELETE FROM rate_limits WHERE window_start < CURRENT_TIMESTAMP - INTERVAL '1 hour';
-    GET DIAGNOSTICS v_count = ROW_COUNT;
-    RETURN v_count;
-END;
-$$ LANGUAGE plpgsql;
-
+-- ============================================================
 -- 🔑 Account lockout columns in users
+-- ============================================================
+
 ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP;

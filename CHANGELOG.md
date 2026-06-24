@@ -7,15 +7,36 @@
 
 ## [Unreleased]
 
-### Добавлено
-- Интеграционные тесты для проверки взаимодействия компонентов (13 тестов)
-- Docker Compose для тестовой БД PostgreSQL
-- Автоматическая генерация тестовых данных в памяти
-- Скрипты быстрого запуска (`quick-start.bat`, `generate-test-data.bat`)
+---
 
-### Изменено
-- Обновлена документация по тестированию
-- Добавлена информация об интеграционных тестах в главный README.md
+## [1.2.1] - 2026-06-24
+
+### Исправлено
+- **Критическая ошибка в тестовой схеме БД (`init-test-db.sql`):**
+  - В таблицу `security_events` добавлена отсутствующая колонка `user_agent TEXT`, которая используется модулем `SecurityAuditor.pas` при логировании событий безопасности.
+  - Ранее при вызове `LogEvent` возникала ошибка `[FireDAC][Phys][PG][libpq] ERROR: column "user_agent" of relation "security_events" does not exist`, что приводило к падению 5 интеграционных тестов и возврату HTTP 500 вместо ожидаемых кодов.
+  - Теперь тестовая схема (`init-test-db.sql`) полностью идентична production-схеме из `migrations/001_security_users.sql`.
+
+- **Некорректное преобразование JSON в `SecurityAuditor.pas`:**
+  - Убран вызов `to_jsonb(:details::text)` в SQL-запросе метода `LogEvent`. Колонка `details` имеет тип `TEXT`, а не `JSONB`, поэтому преобразование было избыточным и приводило к ошибке PostgreSQL при передаче обычных строк (например, `'User ID: 1'`, `'Account locked'`), не являющихся валидным JSON.
+  - Все 4 вызова `LogEvent` в коде (`login_blocked`, `login_failed`, `account_locked`, `login_success`, `rate_limit_exceeded`) передают обычные строки, поэтому преобразование в JSON не требуется.
+  - Методы чтения (`GetRecentEvents`, `GetEventsByUser`, `GetCriticalEvents`, `GetEventsByIP`) используют `.AsString` и также работают корректно со строковым типом.
+
+### Результат
+- **Все 26 интеграционных тестов теперь проходят успешно** (ранее 7 тестов падали с HTTP 500 или неверными данными).
+- Восстановлена работоспособность:
+  - `TestLogin_ValidCredentials_ReturnsToken` — HTTP 200 вместо 500
+  - `TestLogin_InvalidPassword_ReturnsError` — HTTP 200 с JSON-ошибкой вместо 500
+  - `TestLogin_Success_RecordsEvent` — событие успешно записывается в `security_events`
+  - `TestLogin_FailedAfter5Attempts_LocksAccount` — аккаунт корректно блокируется
+  - `TestLogin_UnlockedAfterSuccessfulLogin` — счётчик попыток сбрасывается после успешного входа
+  - `TestRateLimit_LoginExceeded_Returns429` — HTTP 429 вместо 500
+  - `TestRateLimit_UploadExceeded_Returns429` — HTTP 429 вместо 500
+
+### Технические детали
+- Изменения затрагивают только тестовую инфраструктуру и модуль аудита — бизнес-логика (`ServerMethodsUnitMain.pas`, `WebModuleUnitMain.pas`) не изменялась.
+- На production-сервере миграция не требуется: в `migrations/001_security_users.sql` колонка `user_agent` уже присутствовала, а `to_jsonb()` не использовался.
+- Исправления обратно совместимы — не требуется пересборка клиента или изменение API-контракта.
 
 ---
 
@@ -154,5 +175,5 @@
 
 ---
 
-**Последнее обновление:** 2026-06-21  
-**Текущая версия:** 1.2.0
+**Последнее обновление:** 2026-06-24  
+**Текущая версия:** 1.2.1

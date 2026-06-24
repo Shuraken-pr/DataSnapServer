@@ -150,32 +150,35 @@ var
 begin
   Handled := True;
   ClientIP := string(Request.RemoteAddr);
+  UserID := 0;
 
   try
     // 🔑 RATE LIMITING для /upload
     Conn := TFDConnection.Create(nil);
-    if Assigned(Conn) and (AppSettings.ApplyToConn(Conn)) then
     try
-      Limiter := TRateLimiter.Create(Conn);
-      try
-        if Limiter.CheckLimit(ClientIP, '/upload') = rlExceeded then
-        begin
-          Auditor := TSecurityAuditor.Create(Conn);
-          try
-            Auditor.LogEvent('rate_limit_exceeded', '', ClientIP,
-              'Endpoint: /upload (limit: 100/hour)', ssWarning);
-          finally
-            Auditor.Free;
-          end;
+      if Assigned(Conn) and (AppSettings.ApplyToConn(Conn)) then
+      begin
+        Limiter := TRateLimiter.Create(Conn);
+        try
+          if Limiter.CheckLimit(ClientIP, '/upload') = rlExceeded then
+          begin
+            Auditor := TSecurityAuditor.Create(Conn);
+            try
+              Auditor.LogEvent('rate_limit_exceeded', '', ClientIP,
+                'Endpoint: /upload (limit: 100/hour)', ssWarning);
+            finally
+              Auditor.Free;
+            end;
 
-          Response.StatusCode := 429;
-          Response.ContentType := 'application/json';
-          Response.Content := '{"result":"error","message":"Too Many Requests"}';
-          Exit;
+            Response.StatusCode := 429;
+            Response.ContentType := 'application/json';
+            Response.Content := '{"result":"error","message":"Too Many Requests"}';
+            Exit;
+          end;
+          Limiter.RecordRequest(ClientIP, '/upload');
+        finally
+          Limiter.Free;
         end;
-        Limiter.RecordRequest(ClientIP, '/upload');
-      finally
-        Limiter.Free;
       end;
     finally
       FreeAndNil(Conn);
@@ -194,24 +197,26 @@ begin
     end;
 
     Conn := TFDConnection.Create(nil);
-    if Assigned(Conn) and (AppSettings.ApplyToConn(conn)) then
     try
-      QryUser := TFDQuery.Create(nil);
-      try
-        QryUser.Connection := Conn;
-        QryUser.SQL.Text :=
-          'SELECT user_id FROM user_sessions ' +
-          'WHERE session_token = :token AND expires_at > CURRENT_TIMESTAMP ' +
-          'LIMIT 1';
-        QryUser.ParamByName('token').AsString := AuthToken;
-        QryUser.Open;
-        if not QryUser.IsEmpty then
-          UserID := QryUser.FieldByName('user_id').AsLargeInt
-        else
-          UserID := 0;
-        QryUser.Close;
-      finally
-        QryUser.Free;
+      if Assigned(Conn) and (AppSettings.ApplyToConn(conn)) then
+      begin
+        QryUser := TFDQuery.Create(nil);
+        try
+          QryUser.Connection := Conn;
+          QryUser.SQL.Text :=
+            'SELECT user_id FROM user_sessions ' +
+            'WHERE session_token = :token AND expires_at > CURRENT_TIMESTAMP ' +
+            'LIMIT 1';
+          QryUser.ParamByName('token').AsString := AuthToken;
+          QryUser.Open;
+          if not QryUser.IsEmpty then
+            UserID := QryUser.FieldByName('user_id').AsLargeInt
+          else
+            UserID := 0;
+          QryUser.Close;
+        finally
+          QryUser.Free;
+        end;
       end;
 
       if UserID <= 0 then
@@ -380,7 +385,7 @@ begin
             Qry.SQL.Text :=
               'INSERT INTO audit_files (log_id, file_uuid, storage_path, original_filename, file_size, checksum_sha256, mime_type) ' +
               'VALUES (:log_id, :uuid::uuid, :path, :orig, :size, :sha, :mime)';
-            Qry.ParamByName('log_id').AsInteger := LogId;
+            Qry.ParamByName('log_id').AsLargeInt := LogId;
             Qry.ParamByName('uuid').AsString := FileUUID;
             Qry.ParamByName('path').AsString := FilePath;
             Qry.ParamByName('orig').AsString := FileName;

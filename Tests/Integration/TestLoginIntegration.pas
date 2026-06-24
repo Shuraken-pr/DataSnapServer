@@ -1,4 +1,4 @@
-﻿unit TestLoginIntegration;
+unit TestLoginIntegration;
 
 interface
 
@@ -24,7 +24,7 @@ type
     
     /// <summary>INT-002: Авторизация с неверным паролем</summary>
     [Test]
-    procedure TestLogin_InvalidPassword_Returns401;
+    procedure TestLogin_InvalidPassword_ReturnsError;
     
     /// <summary>INT-003: Использование валидного токена для SyncUpload</summary>
     [Test]
@@ -94,7 +94,7 @@ begin
   end;
 end;
 
-procedure TTestLoginIntegration.TestLogin_InvalidPassword_Returns401;
+procedure TTestLoginIntegration.TestLogin_InvalidPassword_ReturnsError;
 var
   Response: IHTTPResponse;
   InitialSessionCount: Integer;

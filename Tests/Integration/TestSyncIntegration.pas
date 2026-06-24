@@ -25,7 +25,7 @@ type
 
     /// <summary>INT-013: Валидация координат</summary>
     [Test]
-    procedure TestSync_InvalidCoordinates_Returns400;
+    procedure TestSync_InvalidCoordinates_ReturnsError;
 
     /// <summary>INT-014: Пустой массив синхронизации</summary>
     [Test]
@@ -188,7 +188,7 @@ begin
   end;
 end;
 
-procedure TTestSyncIntegration.TestSync_InvalidCoordinates_Returns400;
+procedure TTestSyncIntegration.TestSync_InvalidCoordinates_ReturnsError;
 var
   Response: IHTTPResponse;
   JSONPayload: string;
