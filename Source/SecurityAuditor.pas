@@ -1,4 +1,4 @@
-﻿unit SecurityAuditor;
+unit SecurityAuditor;
 
 interface
 
@@ -112,14 +112,14 @@ begin
       'INSERT INTO security_events ' +
       '(event_type, username, ip_address, user_agent, details, severity) ' +
       'VALUES (:event_type, :username, :ip_address, :user_agent, ' +
-      ':details, :severity)';
+      'to_jsonb(:details::text), :severity)';
     
     // 🔑 Явно указываем типы параметров для избежания ошибок FireDAC
     Qry.ParamByName('event_type').DataType := ftWideString;
     Qry.ParamByName('username').DataType := ftWideString;
     Qry.ParamByName('ip_address').DataType := ftWideString;
     Qry.ParamByName('user_agent').DataType := ftWideString;
-    Qry.ParamByName('details').DataType := ftWideString;
+    // 🔑 details передаётся как строка, преобразуется в JSONB через to_jsonb() в SQL
     Qry.ParamByName('severity').DataType := ftWideString;
     
     Qry.ParamByName('event_type').AsString := AEventType;

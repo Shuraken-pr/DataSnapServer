@@ -153,6 +153,16 @@
         <DCCReference Include="TestServerMethods.pas"/>
         <DCCReference Include="TestServerSettings.pas"/>
         <DCCReference Include="TestWinDPAPIUtils.pas"/>
+        <DCCReference Include="TestUploadUtils.pas"/>
+        <DCCReference Include="TestUploadPayloadParser.pas"/>
+        <DCCReference Include="TestSecurityAuditor.pas"/>
+        <DCCReference Include="TestBruteForceProtector.pas"/>
+        <DCCReference Include="TestRateLimiter.pas"/>
+        <DCCReference Include="TestPasswordHasher.pas"/>
+        <DCCReference Include="..\Source\SecurityAuditor.pas"/>
+        <DCCReference Include="..\Source\BruteForceProtector.pas"/>
+        <DCCReference Include="..\Source\RateLimiter.pas"/>
+        <DCCReference Include="..\Source\PasswordHasher.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

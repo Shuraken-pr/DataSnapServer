@@ -158,6 +158,7 @@
         <DCCReference Include="TestLoginIntegration.pas"/>
         <DCCReference Include="TestUploadIntegration.pas"/>
         <DCCReference Include="TestSyncIntegration.pas"/>
+        <DCCReference Include="TestSecurityIntegration.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

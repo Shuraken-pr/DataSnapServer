@@ -23,6 +23,7 @@ type
     { Public declarations }
     function updateSyncUpload(const AJsonData: string): string;
     function updateLogin(const AUsername, APassword: string): TJSONObject;
+    function Login(const AUsername, APassword: string): TJSONObject;
   end;
 
 const
@@ -92,6 +93,11 @@ begin
       'Z', '', [rfReplaceAll]), D, FS);
 end;
 
+function TServerMethods1.Login(const AUsername, APassword: string): TJSONObject;
+begin
+  Result := updateLogin(AUsername, APassword);
+end;
+
 function TServerMethods1.updateLogin(const AUsername, APassword: string): TJSONObject;
 var
   UserID: Int64;
@@ -115,10 +121,13 @@ begin
 
   RootVal := TJSONObject.ParseJSONValue(AUsername);
   try
-    try
-      curUserName := TJSONObject(RootVal).GetValue('AUsername').Value;
-      curPassword := TJSONObject(RootVal).GetValue('APassword').Value;
-    except
+    if Assigned(RootVal) then
+    begin
+      try
+        curUserName := TJSONObject(RootVal).GetValue('AUsername').Value;
+        curPassword := TJSONObject(RootVal).GetValue('APassword').Value;
+      except
+      end;
     end;
   finally
     RootVal.Free;
