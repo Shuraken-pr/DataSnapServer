@@ -467,29 +467,31 @@ begin
     begin
       // 🔑 RATE LIMITING для Login
       Conn := TFDConnection.Create(nil);
-      if Assigned(Conn) and (AppSettings.ApplyToConn(Conn)) then
       try
-        Limiter := TRateLimiter.Create(Conn);
-        try
-          if Limiter.CheckLimit(ClientIP, '/Login') = rlExceeded then
-          begin
-            Auditor := TSecurityAuditor.Create(Conn);
-            try
-              Auditor.LogEvent('rate_limit_exceeded', '', ClientIP,
-                'Endpoint: /Login (limit: 20/hour)', ssWarning);
-            finally
-              Auditor.Free;
-            end;
+        if AppSettings.ApplyToConn(Conn) then
+        begin
+          Limiter := TRateLimiter.Create(Conn);
+          try
+            if Limiter.CheckLimit(ClientIP, '/Login') = rlExceeded then
+            begin
+              Auditor := TSecurityAuditor.Create(Conn);
+              try
+                Auditor.LogEvent('rate_limit_exceeded', '', ClientIP,
+                  'Endpoint: /Login (limit: 20/hour)', ssWarning);
+              finally
+                Auditor.Free;
+              end;
 
-            Response.StatusCode := 429;
-            Response.Content := '{"error":"Too Many Requests"}';
-            Response.ContentType := 'application/json';
-            Handled := True;
-            Exit;
+              Response.StatusCode := 429;
+              Response.Content := '{"error":"Too Many Requests"}';
+              Response.ContentType := 'application/json';
+              Handled := True;
+              Exit;
+            end;
+            Limiter.RecordRequest(ClientIP, '/Login');
+          finally
+            Limiter.Free;
           end;
-          Limiter.RecordRequest(ClientIP, '/Login');
-        finally
-          Limiter.Free;
         end;
       finally
         FreeAndNil(Conn);
@@ -512,24 +514,26 @@ begin
       // Проверяем токен и сразу получаем user_id — один запрос вместо двух
       UserID := 0;
       Conn := TFDConnection.Create(nil);
-      if Assigned(Conn) and (AppSettings.ApplyToConn(conn)) then
       try
-        QryUser := TFDQuery.Create(nil);
-        try
-          QryUser.Connection := Conn;
-          QryUser.SQL.Text :=
-            'SELECT user_id FROM user_sessions ' +
-            'WHERE session_token = :token AND expires_at > CURRENT_TIMESTAMP ' +
-            'LIMIT 1';
-          QryUser.ParamByName('token').AsString := SessionToken;
-          QryUser.Open;
-          if not QryUser.IsEmpty then
-            UserID := QryUser.FieldByName('user_id').AsLargeInt
-          else
-            UserID := 0;
-          QryUser.Close;
-        finally
-          QryUser.Free;
+        if AppSettings.ApplyToConn(conn) then
+        begin
+          QryUser := TFDQuery.Create(nil);
+          try
+            QryUser.Connection := Conn;
+            QryUser.SQL.Text :=
+              'SELECT user_id FROM user_sessions ' +
+              'WHERE session_token = :token AND expires_at > CURRENT_TIMESTAMP ' +
+              'LIMIT 1';
+            QryUser.ParamByName('token').AsString := SessionToken;
+            QryUser.Open;
+            if not QryUser.IsEmpty then
+              UserID := QryUser.FieldByName('user_id').AsLargeInt
+            else
+              UserID := 0;
+            QryUser.Close;
+          finally
+            QryUser.Free;
+          end;
         end;
       finally
         FreeAndNil(Conn);

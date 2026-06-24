@@ -134,6 +134,7 @@ begin
   end;
 
   // 🔑 ИНИЦИАЛИЗАЦИЯ модулей безопасности
+  AppSettings.ApplyToConn(PGConn);
   Protector := TBruteForceProtector.Create(PGConn);
   Auditor := TSecurityAuditor.Create(PGConn);
   try
@@ -152,7 +153,6 @@ begin
     // 🔑 ШАГ 2: Проверка пароля через bcrypt (pgcrypto) с fallback на plain text
     QryUser := TFDQuery.Create(nil);
     try
-      AppSettings.ApplyToConn(PGConn);
       QryUser.Connection := PGConn;
 
       // Попытка 1: bcrypt через pgcrypto crypt()
