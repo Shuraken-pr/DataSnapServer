@@ -1,4 +1,4 @@
-﻿unit WebModuleUnitMain;
+unit WebModuleUnitMain;
 
 // ИСПРАВЛЕНО по итогам код-ревью:
 //   [CRITICAL] Добавлена базовая аутентификация через TDSAuthenticationManager
@@ -286,6 +286,10 @@ begin
           Response.Content := '{"result":"error","message":"Missing photo_base64"}';
           Exit;
         end;
+
+        // 🔑 Удаляем возможные переносы строк из Base64 (JSON может добавить \n при передаче)
+        PhotoBase64 := StringReplace(PhotoBase64, #13, '', [rfReplaceAll]);
+        PhotoBase64 := StringReplace(PhotoBase64, #10, '', [rfReplaceAll]);
 
         if not TryDecodeBase64(PhotoBase64, PhotoBytes) then
         begin

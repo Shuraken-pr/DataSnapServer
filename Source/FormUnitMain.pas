@@ -1,4 +1,4 @@
-﻿unit FormUnitMain;
+unit FormUnitMain;
 
 // ИСПРАВЛЕНО по итогам код-ревью:
 //   [HIGH]   Добавлен FormDestroy для корректной остановки сервера
@@ -290,13 +290,13 @@ begin
 
   with FServer.Bindings.Add do
   begin
-    IP := '127.0.0.1'; // Только локальные подключения от Nginx
+    IP := '0.0.0.0';    // 🔑 Слушаем все интерфейсы (LAN + localhost) для прямого HTTP
     Port := CurPort;    // Обычно 8082
   end;
 
   FServer.DefaultPort := CurPort;
   FServer.Active := True;
-  Log.Info(Format('StartServer: Server started in HTTP mode on port %d (behind Nginx)', [CurPort]));
+  Log.Info(Format('StartServer: Server started in HTTP mode on 0.0.0.0:%d (all interfaces)', [CurPort]));
 end;
 
 procedure TfrmServer.tmrCheckSessionsTimer(Sender: TObject);
