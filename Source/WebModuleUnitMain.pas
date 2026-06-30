@@ -61,6 +61,7 @@ type
   private
     FServerFunctionInvokerAction: TWebActionItem;
     function AllowServerFunctionInvoker: Boolean;
+    function GetRealClientIP: string;
   public
   end;
 
@@ -149,7 +150,7 @@ var
   ClientIP: string;
 begin
   Handled := True;
-  ClientIP := string(Request.RemoteAddr);
+  ClientIP := GetRealClientIP;
   UserID := 0;
 
   try
@@ -448,7 +449,7 @@ var
   ClientIP: string;
 begin
   CurrentUserID := 0;
-  ClientIP := string(Request.RemoteAddr);
+  ClientIP := GetRealClientIP;
   CurrentIP := ClientIP;  // 🔑 Сохраняем IP в потоковую переменную
   PathInfo := string(Request.InternalPathInfo);
 
@@ -512,7 +513,7 @@ begin
 
       if SessionToken = '' then
       begin
-        Log.Warn(Format('WebModule: Missing session token from %s', [string(Request.RemoteAddr)]));
+        Log.Warn(Format('WebModule: Missing session token from %s', [GetRealClientIP]));
         Response.StatusCode := 401;
         Response.Content := '{"error":"Unauthorized"}';
         Response.ContentType := 'application/json';
@@ -554,7 +555,7 @@ begin
       end
       else
       begin
-        Log.Warn(Format('WebModule: Invalid/expired token from %s', [string(Request.RemoteAddr)]));
+        Log.Warn(Format('WebModule: Invalid/expired token from %s', [GetRealClientIP]));
         Response.StatusCode := 401;
         Response.ContentType := 'application/json';
         Response.Content := '{"error":"Unauthorized: session expired or invalid"}';
@@ -589,10 +590,38 @@ begin
   valid := True;
 end;
 
-function TWebModule1.AllowServerFunctionInvoker: Boolean;
+function TWebModule1.GetRealClientIP: string;
+var
+  XForwardedFor: string;
+  P: Integer;
 begin
-  Result := (Request.RemoteAddr = '127.0.0.1') or
-    (Request.RemoteAddr = '0:0:0:0:0:0:0:1') or (Request.RemoteAddr = '::1');
+  Result := string(Request.RemoteAddr);
+  
+  // 🔑 Если запрос пришёл через reverse proxy (Nginx), берём реальный IP из X-Forwarded-For
+  if (Result = '127.0.0.1') or (Result = '::1') or 
+     (Result = '0:0:0:0:0:0:0:1') then
+  begin
+    XForwardedFor := string(Request.GetFieldByName('X-Forwarded-For'));
+    if XForwardedFor <> '' then
+    begin
+      // X-Forwarded-For может содержать несколько IP через запятую: client, proxy1, proxy2
+      // Берём первый (реальный клиент)
+      P := Pos(',', XForwardedFor);
+      if P > 0 then
+        Result := Trim(Copy(XForwardedFor, 1, P - 1))
+      else
+        Result := Trim(XForwardedFor);
+    end;
+  end;
+end;
+
+function TWebModule1.AllowServerFunctionInvoker: Boolean;
+var
+  RealIP: string;
+begin
+  RealIP := GetRealClientIP;
+  Result := (RealIP = '127.0.0.1') or
+    (RealIP = '0:0:0:0:0:0:0:1') or (RealIP = '::1');
 end;
 
 procedure TWebModule1.WebFileDispatcher1BeforeDispatch(Sender: TObject;
